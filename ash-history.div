@@ -1,0 +1,43 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+if [ -s /opt/share/diversion/.conf/diversion.conf ]; then
+	. /opt/share/diversion/.conf/diversion.conf
+	if [ "$shHistory" = on ] ; then
+		ashtimer=0
+		while [ -f /tmp/div_lock_ash ] && [ "$ashtimer" -lt 10 ]; do
+			ashtimer=$((ashtimer+1))
+			sleep 1
+		done
+
+		if [ -f /tmp/div_lock_ash ]; then
+			kill "$(sed -n '1p' /tmp/div_lock_ash)" 2> /dev/null
+			rm -f /jffs/.ash_history /home/root/.ash_history /tmp/div_sort_ash
+			echo "$$" >/tmp/div_lock_ash
+		else
+			echo "$$" >/tmp/div_lock_ash
+		fi
+		if [ -f /jffs/.ash_history  ]; then
+			[ "$(wc -l < /jffs/.ash_history )" -gt 300 ] && sed -i '1,50d' /jffs/.ash_history
+			cat /jffs/.ash_history | sed '/diversion$/d; /amtm/d; /^ *$/d' | sort -urb >/tmp/div_sort_ash
+		else
+			>/tmp/div_sort_ash
+		fi
+		echo 'diversion' >>/tmp/div_sort_ash
+		[ -f /jffs/scripts/amtm ] || [ -f /usr/sbin/amtm ] && echo 'amtm' >>/tmp/div_sort_ash
+		mv -f /tmp/div_sort_ash /jffs/.ash_history
+		ln -sf /jffs/.ash_history /home/root/
+		rm -f /tmp/div_lock_ash
+	fi
+fi
+#eof

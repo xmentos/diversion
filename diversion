@@ -1,0 +1,1748 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+VERSION=4.1.11
+RELEASED="April 01 2020"
+SELF=diversion
+NAME=Diversion
+TITLE="Diversion - the Router Ad-Blocker"
+
+DIVERSION_DIR=/opt/share/diversion
+LOG_DIR=/opt/var/log
+case "$RELEASED" in
+	*XX*) 	DIVERSION_URL=http://diversion.test/diversion;devEnv=1;;
+	*) 		DIVERSION_URL=https://diversion.ch/diversion;;
+esac
+
+ascii_logo(){
+	echo "  ____  _                    _ "
+	echo " |  _ \(_)_   _____ _ __ ___(_) ___  _ __ "
+	echo " | | | | \ \ / / _ \ '__/ __| |/ _ \| '_ \ "
+	echo " | |_| | |\ V /  __/ |  \__ \ | (_) | | | |"
+	echo " |____/|_| \_/ \___|_|  |___/_|\___/|_| |_|"
+	echo
+	echo " $1"
+
+	if [ "$1" = 'Rebooting...' ]; then
+		printf " $NAME reboots this router now\\n\\n"
+		sleep 5
+		[ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock
+		service reboot >/dev/null 2>&1 &
+		exit 0
+	elif [ "$1" = "Goodbye" ]; then
+		echo
+		[ "$STATE" = "5" ] && [ -f /opt/share/diversion/file/ash-history.div ] && sh /opt/share/diversion/file/ash-history.div &
+		[ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock
+		exit 0
+	elif [ "$1" = "Welcome" ]; then
+		printf " This is $NAME $VERSION\\n\\n"
+	fi
+}
+
+state_check(){
+	STATE=1
+	if [ -s "${DIVERSION_DIR}/.conf/diversion.conf" ]; then
+		. "${DIVERSION_DIR}/.conf/diversion.conf"
+		STATE=5
+
+		if [ -z "$EDITION" ]; then
+			STATE=3
+			[ "$(opkg list-installed | /opt/bin/grep pixelserv-tls)" ] && EDITION=Standard || EDITION=Lite
+		fi
+
+		case "$EDITION" in
+			Lite)		EN=1;;
+			Standard)	EN=2;;
+		esac
+
+		if [ -z "$action" ]; then
+			reqscripts='/jffs/scripts/dnsmasq.postconf /jffs/scripts/post-mount /jffs/addons/diversion/mount-entware.div /jffs/scripts/services-stop /jffs/scripts/unmount'
+			for file in $reqscripts; do
+				if [ ! -s "$file" ]; then
+					echo " - $file missing"
+					STATE=2
+					action=re-install
+					missingscripts=1
+				fi
+			done
+		fi
+
+		if ! cmp -s "$0" "/opt/bin/$SELF"; then
+			STATE=3
+
+		elif [ "$VERSION" != "$thisVERSION" ]; then
+			STATE=3
+
+		elif [ "$0" != "/opt/bin/$SELF" ]; then
+			rm -f "$0"
+			reload_SELF
+
+		elif [ "$action" ]; then
+			STATE=2
+		fi
+	fi
+
+	[ "$STATE" != "5" ] && set --
+
+	[ -z "$THEME" ] && THEME=local
+	theme_$THEME
+
+	if [ "$STATE" = "1" ]; then
+		if [ -f "/usr/sbin/curl" ]; then
+			# Prompt install
+			clear
+			ascii_logo " "
+			printf "%-34s%s\\n" " This is $NAME $VERSION " "by thelonelycoder"
+			print_red_line
+			echo " Welcome to $TITLE"
+			print_red_line
+			show_message
+			while true; do
+				printf " Install $NAME now? [1=Yes e=Exit] ";read -r selection
+				case "$selection" in
+					1) 		print_red_line
+							action=install
+							d_function;break;;
+					[Ee])	clear
+							[ "$(cd "$(dirname "$0")"; pwd -P)/$SELF" != "/opt/bin/$SELF" ] && rm -f "$(cd "$(dirname "$0")"; pwd -P)/$SELF"
+							ascii_logo Goodbye;break;;
+					*) 		printf "\\n input is not an option\\n\\n";;
+				esac
+			done
+		else
+			echo
+			echo " Sorry, wrong platform."
+			echo " $NAME cannot be installed on this device."
+			rm -f $0
+			ascii_logo Goodbye
+		fi
+
+	elif [ "$STATE" = "2" ]; then
+		# Run action set before last restart
+		if [ "$missingscripts" ]; then
+			printf "\\n${NOK} Required $NAME /jffs file(s)\\n${SPACE} missing, running checks now!\\n"
+			missingscripts=
+		fi
+		printf "${INFO} Running function $action\\n"
+		d_function
+
+	elif [ "$STATE" = "3" ]; then
+		# Run auto-update
+		if [ "$missingscripts" ]; then
+			printf "\\n${NOK} Required $NAME /jffs file(s)\\n${SPACE} missing, running checks now!\\n"
+			missingscripts=
+		fi
+		action=auto-update
+		echo
+		echo "${ATTN} $NAME update detected"
+		printf "\\n${INFO} Running function $action now\\n"
+		d_function
+
+	elif [ "$STATE" = "5" ]; then
+		trap - 1 2 3 6 15
+		if [ -f "/tmp/diversion-reboot" ]; then
+			ascii_logo 'Rebooting...'
+		elif [ "$#" = "0" ]; then
+			echo "${NC}" # to reset colors
+			menuActive=1
+			show_menu
+		else
+			# Show basic menu
+			case "${@}" in
+				"sh-"* | *" sh"	)	bm=ios ;;
+				*)					bm=ssh ;;
+			esac
+
+			case "${@}" in
+				"h"|"help"|"f"|"follow"|"unmount"|"mount")	;;
+				*)	diversion_lock "basic-menu option ${@}" ;;
+			esac
+			infotext="${INFO} Enter '$SELF help' for more options"
+			case "${1}" in
+				"h" | "help"		) 	clear
+										ascii_logo Welcome
+										diversion_help;;
+				"a" | "adblocking"	)  	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										a_function;;
+				"sh-a"				)	a_function;;
+				"l" | "logging"		)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										l_function;;
+				"sh-l"				)	l_function;;
+				"enable"			)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										on_off_diversion "$@";;
+				"sh-enable"			)	on_off_diversion enable;;
+				"disable"			)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										on_off_diversion "$@";;
+				"sh-disable"		)	on_off_diversion disable;;
+				"restart"			)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										on_off_diversion "$@";;
+				"sh-restart"		)	on_off_diversion restart;;
+				"unmount"			)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										on_off_diversion "$@";;
+				"mount"				)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										on_off_diversion "$@";;
+				"f" | "follow"		)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										follow_dnsmasq;;
+				"ac" | "count_ads"	)	ac_function "$@";;
+				"fs"				)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										fs_function "$@";;
+				"sh-fs"				)	fs_function "$@";;
+				"sh-state"			)	state_function "$@";;
+				"bu" | "bl-update"	)	clear
+										ascii_logo Welcome
+										echo "$infotext"
+										echo
+										update_blockinglist;;
+				"sh-bl-update"		)	update_blockinglist;;
+				"sh-hl-process"		)	get_file functions.div include >/dev/null
+										process_hosted_lists;;
+				*					)	if [ "$bm" = ssh ]; then
+											clear
+											ascii_logo Welcome
+											echo "${NOK} Unknown command: ${@}"
+											echo
+											diversion_help
+										else
+											echo "Unknown command: ${@}"
+										fi;;
+			esac
+			echo
+			[ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock
+			exit 0
+		fi
+	fi
+}
+
+show_message(){
+	[ -f /tmp/divmessage ] && . /tmp/divmessage
+	if [ "$lastAction" ]; then
+		printf "${DONE}${GREEN}$lastAction${NC}\\n\\n"
+		lastAction=
+	elif [ "$lastError" ]; then
+		printf "${ERR}${RED}$lastError${NC}\\n\\n"
+		lastError=
+	fi
+	[ -f /tmp/divmessage ] && rm /tmp/divmessage
+}
+
+show_menu(){
+	if [ "$adsCounter" = "on" ]; then
+		if [ -z "$acOff" ] && [ "$logging" = "on" ] && [ "$adblocking" = "on" ] && [ "$DIVERSION_STATUS" = "enabled" ]; then
+			printf "${INFO} Updating ads counter...\\n\\n"
+			ac_function
+		fi
+		acOff=
+	fi
+
+	clear
+
+	case "$DIVERSION_STATUS" in
+		enabled	) 	divColor="${GREEN}"
+					adColor="${GREEN}"
+					logColor="${GREEN}"
+					bfColor="${GREEN}"
+					psColor="${GREEN}"
+					dsColor="${GREEN}"
+					wlColor="${GREEN_BG}"
+					blColor="${ERR_BG}";;
+		disabled)	divColor="${RED}"
+					adColor="${RED}"
+					logColor="${RED}"
+					bfColor="${RED}"
+					psColor="${RED}"
+					dsColor="${RED}"
+					wlColor="${RED}"
+					blColor="${RED}";;
+	esac
+
+	case "$fwUpdate" in
+		on) fwnColor="${GREEN}";;
+		 *)	fwnColor="${NC}";;
+	esac
+
+	case "$dsSetting" in
+		on) dsColor="${GREEN}";;
+		 *)	dsColor="${NC}";;
+	esac
+
+	case "$divUpdate" in
+		on)	divnColor="${GREEN}"
+			[ "$DIVERSION_STATUS" = "disabled" ] && divnColor="${RED}";;
+		*)	divnColor="${NC}";;
+	esac
+
+	case "$backup" in
+		on)	buColor="${GREEN}"
+			[ "$DIVERSION_STATUS" = "disabled" ] && buColor="${RED}";;
+		*)	buColor="${NC}";;
+	esac
+
+	case "$weeklyStats" in
+		on)	wsColor="${GREEN}"
+			[ "$logging" = "off" ] && wsColor="${RED}"
+			[ "$DIVERSION_STATUS" = "disabled" ] && wsColor="${RED}";;
+		*)	wsColor="${NC}";;
+	esac
+
+	case "$adsCounter" in
+		on) adsColor="${GREEN}"
+			[ "$DIVERSION_STATUS" = "disabled" ] && adsColor="${RED}";;
+		 *)	adsColor="${NC}";;
+	esac
+
+	if [ "$logging" = "off" ]; then
+		logColor="${RED}"
+		logtext=$logging
+		logtextAlt=$logging
+		adsColor="${RED}"
+	else
+		logtext="dnsmasq.log ${NC}$(du -h "${LOG_DIR}/dnsmasq.log" | awk '{print $1}')"
+		if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+			[ -s "${LOG_DIR}/dnsmasq.log3" ] && logtextAlt="dnsmasq.log3 ${NC}$(du -h "${LOG_DIR}/dnsmasq.log3" | awk '{print $1}')" || logtextAlt="dnsmasq.log3"
+		fi
+	fi
+
+	if [ "$EN" -ge "2" ]; then
+		[ "$psState" = "off" ] && psColor="${RED}"
+		check_ps_version
+	fi
+
+	if [ "$adblocking" = "off" ]; then
+		adColor="${RED}"
+		bfColor="${RED}"
+		psColor="${RED}"
+		adbtext=$adblocking
+		adsColor="${RED}"
+		wlColor="${RED}"
+		blColor="${RED}"
+	else
+		adbtext="to IP $blockingIP"
+	fi
+
+	if [ "$bfFs" = "on" ]; then
+		case "$bfTypeFs" in
+			Minimal | Small | Standard | Medium | Large | Custom);;
+			*) 	if [ -f "${DIVERSION_DIR}/list/hostslist_fs" ] && [ "$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/hostslist_fs" | wc -l)" -ge "1" ]; then
+					bfTypeFs=Custom
+					write_conf_file
+					lastError=" Unknown secondary blocking list type set\\n to Custom"
+				else
+					bfFs=off
+					bfTypeFs=
+					if [ "$bfTypeinUse" = "secondary" ]; then
+						bfinUse=$bfType
+						bfTypeinUse=primary
+					fi
+					write_conf_file
+					restart_DNSMASQ
+					lastError=" Unknown secondary blocking type, ${NC}${RED_BG} sf ${NC}\\n${RED} has been disabled"
+					reload_menu
+				fi;;
+		esac
+		[ "$bfTypeinUse" = "primary" ] && bfinUse=$bfType || bfinUse=$bfTypeFs
+		FS="${RED_BG} fs ${NC}"
+	else
+		bfinUse=$bfType
+		FS="    "
+	fi
+
+	case "$(nvram get ipv6_service)" in
+		disabled) ipv6=;;
+			   *) ipv6="${GREEN}IPv6${NC}";;
+	esac
+
+	HL=hostslist
+	if [ "$bfFs" = "on" ]; then
+		if [ "$bfTypeinUse" = "primary" ]; then
+			large_number "$blockedDomains";bd=$num
+		elif [ "$bfTypeinUse" = "secondary" ]; then
+			large_number "$blockedDomainsFs";bd=$num
+			HL=hostslist_fs
+		fi
+	else
+		large_number "$blockedDomains";bd=$num
+	fi
+
+	large_number "$adsBlocked";adsBlockedHuman=$num
+	large_number "$adsWeek";adsWeekHuman=$num
+	large_number "$adsNew";adsNewHuman=$num
+	lc=$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/$HL" | wc -l)
+	wlc=$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/whitelist" | wc -l)
+	blc=$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/blacklist" | wc -l)
+	[ "$(nvram get ipv6_service)" != "disabled" ] && blc="$((blc/2))"
+	wcblc=$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/wc_blacklist" | wc -l)
+
+	if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+		lca=$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/hostslist_fs" | wc -l)
+		large_number "$blockedDomainsFs";bda=$num
+
+		large_number "$adsBlockedAlt";adsBlockedAltHuman=$num
+		large_number "$adsWeekAlt";adsWeekAltHuman=$num
+		large_number "$adsNewAlt";adsNewAltHuman=$num
+
+		large_number "$((adsBlocked+adsBlockedAlt))";adsBlockedAltHumanT=$num
+		large_number "$((adsWeek+adsWeekAlt))";adsWeekAltHumanT=$num
+		large_number "$((adsNew+adsNewAlt))";adsNewAltHumanT=$num
+	fi
+
+	unset "swaplocation" "swapsize" "partitionsize" "swtext" "multipleswap"
+	if ! /opt/bin/grep -q 'do-not-check-swap' /jffs/scripts/post-mount; then
+		swaplocation="$(/opt/bin/grep -E "^swapon " /jffs/scripts/post-mount | awk '{print $2}')"
+	else
+		swaplocation="$(/opt/bin/grep -E "swapon " /jffs/scripts/post-mount | awk '{print $2}')"
+	fi
+	if [ "$(wc -l < /proc/swaps)" -eq "2" ]; then
+		if [ -f "$swaplocation" ] && [ "$swaplocation" = "$(sed -n '2p' /proc/swaps | awk '{print $1}')" ]; then
+			if /opt/bin/grep -qE "^swapon $swaplocation" /jffs/scripts/post-mount; then
+				swapsize=$(du -h "$swaplocation" | awk '{print $1}')
+			else
+				check_swap
+			fi
+		else
+			check_swap
+		fi
+	else
+		check_swap
+	fi
+	[ "$swtext" ] && ! /opt/bin/grep -q 'do-not-check-swap' /jffs/scripts/post-mount && lastAction="$swtext"
+
+	printf "%-${DCORR}s%s\\n\\n" "${RED_BG} $NAME $VERSION" "by thelonelycoder ${NC}"
+
+	[ -z "$(nvram get odmpid)" ] && routerModel=$(nvram get productid) || routerModel=$(nvram get odmpid)
+	echo " $routerModel ($(uname -m)) FW-$(nvram get buildno) @ $(nvram get lan_ipaddr) $ipv6"
+
+	if [ "$DIVERSION_STATUS" = "enabled" ]; then
+		echo
+		if [ "$logging" = "on" ] && [ "$adblocking" = "on" ]; then
+			[ "$bfUpdateLastRun" = "$bfUpdatePrevRun" ] && echo "${RED} Domain count off until blocking list update is run${NC}"
+			[ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && echo " Primary ad-blocking"
+			echo "${ERR_BG} $bd ${NC} blocked domains by ${ERR_BG} $lc ${NC} hosts file(s)"
+			[ "$lc" -eq 0 ] && echo "${RED} hosts list empty, blocking list update will not run${NC}"
+			[ "$blockedDomains" -lt 200 ] && echo "${RED} blocking list less than 200 domains, investigate${NC}"
+			echo "${GREEN_BG} $adsBlockedHuman t${NC} ${GREEN_BG} $adsWeekHuman w${NC} ${GREEN_BG} $adsNewHuman n${NC} ads since $adsPrevCount"
+			if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+				echo " Alternate ad-blocking"
+				echo "${ERR_BG} $bda ${NC} blocked domains by ${ERR_BG} $lca ${NC} hosts file(s)"
+				[ "$lca" -eq 0 ] && echo "${RED} hosts list empty, blocking list update will not run${NC}"
+				[ "$blockedDomainsFs" -lt 200 ] && echo "${RED} blocking list less than 200 domains, investigate${NC}"
+				echo "${GREEN_BG} $adsBlockedAltHuman t${NC} ${GREEN_BG} $adsWeekAltHuman w${NC} ${GREEN_BG} $adsNewAltHuman n${NC}"
+				echo " Combined ad-blocking totals"
+				echo "${GREEN_BG} $adsBlockedAltHumanT t${NC} ${GREEN_BG} $adsWeekAltHumanT w${NC} ${GREEN_BG} $adsNewAltHumanT n${NC}"
+			fi
+		elif [ "$logging" = "on" ] && [ "$adblocking" = "off" ]; then
+			echo "ad-blocking off, stats not available"
+		elif [ "$logging" = "off" ] && [ "$adblocking" = "on" ]; then
+			[ "$bfUpdateLastRun" = "$bfUpdatePrevRun" ] && echo "${RED} Domain count off until blocking list update is run${NC}"
+			[ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && echo " Primary ad-blocking"
+			echo "${ERR_BG} $bd ${NC} blocked domains by ${ERR_BG} $lc ${NC} hosts file(s)"
+			[ "$lc" -eq 0 ] && echo "${RED} hosts list empty, blocking list update will not run${NC}"
+			[ "$blockedDomains" -lt 200 ] && echo "${RED} blocking list less than 200 domains, investigate${NC}"
+			if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+				echo " Alternate ad-blocking"
+				echo "${ERR_BG} $bda ${NC} blocked domains by ${ERR_BG} $lca ${NC} hosts file(s)"
+				[ "$lca" -eq 0 ] && echo "${RED} hosts list empty, blocking list update will not run${NC}"
+				[ "$blockedDomainsFs" -lt 200 ] && echo "${RED} blocking list less than 200 domains, investigate${NC}"
+			fi
+			echo "logging off, no stats available"
+		else
+			echo "ad-blocking and logging off, stats not available"
+		fi
+	fi
+
+	thisDev="${entPath#/tmp}"
+	printf "\\n%-$((DCORR+18))s%s\\n\\n" "${RED_BG} $(df -kh ${entPath%/entware} | xargs | awk '{print "'${thisDev%/entware}' | "$2" "$9" | "$3" "$10" ("$12")"}')" "${NC}"
+
+	[ "$UNMOUNT_STATUS" = "unmounted" ] && us=" (unmounted)" || us=
+	printf "${RED_BG} d  ${NC} %-21s%s\\n" "$NAME $EDITION" "$divColor$DIVERSION_STATUS$us${NC}"
+	if [ "$DIVERSION_STATUS" = "enabled" ]; then
+		printf "${RED_BG} c  ${NC} %-21s%s\\n" "communication" "${divnColor}DivUn${NC} ${wsColor}stats${NC} ${buColor}backup${NC} ${fwnColor}FWun${NC}"
+		echo
+		printf "${RED_BG} a  ${NC} %-21s%s\\n" "ad-blocking" "$adColor$adbtext${NC}"
+		printf "${RED_BG} l  ${NC} %-21s%s\\n" "logging" "$logColor$logtext${NC}"
+		[ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && printf "${RED_BG}    ${NC} %-21s%s\\n" "alternate logfile" "$logColor$logtextAlt${NC}"
+		echo
+		if [ "$EN" -ge "2" ]; then
+			if [ "$LANblockingIP" = "on" ]; then
+				printf "${RED_BG} ep ${NC} %-21s%s\\n" "entware packages" "(LAN blocking IP enabled)"
+			else
+				printf "${RED_BG} ep ${NC} %-21s%s\\n" "pixelserv-tls" "$psColor$psIP${NC} $psVersion"
+			fi
+		elif [ "$EN" -eq "1" ]; then
+			echo "${RED_BG} ep ${NC} entware packages"
+		fi
+		echo
+		printf "${RED_BG} b  ${NC} blocking list $FS   $bfColor$bfinUse${NC} $(echo $bfUpdateDOW | sed 's/,/, /') @ ${bfUpdateHour}:00\\n"
+		[ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && printf "${RED_BG}    ${NC} %-21s%s\\n" "alternate BL" "$bfColor$bfTypeFs${NC} $(echo $bfUpdateDOW | sed 's/,/, /') @ ${bfUpdateHour}:00"
+		printf "${RED_BG} el ${NC} %-21s%s\\n" "edit lists" "$wlColor $wlc w${NC} $blColor $blc b${NC} $blColor $wcblc wb${NC}"
+		echo
+		echo "${RED_BG} f  ${NC} follow dnsmasq.log"
+	fi
+
+	options_menu(){
+		echo
+		if [ "$DIVERSION_STATUS" = "enabled" ]; then
+			printf "${RED_BG} ac ${NC} %-21s%s\\n" "update ads counter" "Auto-update ${RED_BG} au ${NC} ${adsColor}$adsCounter${NC}"
+			printf "${RED_BG} ds ${NC} %-21s%s\\n" "dnsmasq settings" "${dsColor}$dsSetting${NC}"
+		fi
+
+		if [ -f "$swaplocation" ]; then
+			printf "${RED_BG} sw ${NC} %-21s%s\\n" "manage swap file" "${GREEN}$(echo "${swaplocation#/tmp}" | sed 's|/myswap.swp||')${NC} $swapsize"
+		elif [ "$swaplocation" ] && [ "$partitionsize" ]; then
+			printf "${RED_BG}    ${NC} %-21s%s\\n" "swap partition" "${GREEN}$swaplocation${NC} ${partitionsize}M"
+		elif [ "$multipleswap" ]; then
+			printf "${RED_BG} sw ${NC} %-21s%s\\n" "delete swap files" ""
+		else
+			echo "${RED_BG} sw ${NC} create swap file"
+		fi
+
+		printf "${RED_BG} ct ${NC} %-21s%s\\n" "change theme colors" "${RED_BG} $THEME ${NC}"
+		echo
+		if [ "$shHistory" = "on" ]; then
+			printf "${RED_BG} sh ${NC} %-21s%s\\n" "shell history" "${GREEN}on${NC}"
+		else
+			printf "${RED_BG} sh ${NC} %-21s%s\\n" "shell history" "off"
+		fi
+		printf "${RED_BG} cj ${NC} %-21s\\n" "show cron job(s)"
+		printf "${RED_BG} sf ${NC} %-21s\\n" "show file content"
+	}
+	[ "$uiOptions" ] && more=$uiOptions
+	[ -z "$more" ] && more=more
+	[ "$more" = "less" ] && options_menu
+	echo
+	echo "${RED_BG} e  ${NC} exit ${RED_BG} u ${NC} update                $more options ${RED_BG} o ${NC}"
+
+	print_red_line
+	show_message
+
+	while true; do
+		printf "${RED_BG} What do you want to do? ${NC} ";read -r selection
+		case "$selection" in
+			[Dd]	)	# Diversion options
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						d_function;break;;
+			[Cc]	)	# Communication settings
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						c_function
+						reload_menu;break;;
+			[Aa]	)	# Enable/disable ad-blocking
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						a_function
+						reload_menu;break;;
+			[Ll]	)	# Enable/disable Logging
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						l_function
+						reload_menu;break;;
+			[Ee][Pp])	# Manage Entware
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						ep_function
+						reload_menu;break;;
+			[Bb]	)	# blocking list operations
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						b_function
+						reload_menu;break;;
+			[Bb][Uu])	# blocking list update shortcut (runs in background)
+						update_blockinglist
+						reload_menu;break;;
+			[Ff][Ss])	# blocking list fast switch
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						fs_function
+						reload_menu;break;;
+			[Ee][Ll])	# edit the whitelist or blacklist files
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						el_function
+						reload_menu;break;;
+			[Ff]	)	# follow the dnsmasq.log
+						print_red_line
+						get_file functions.div include >/dev/null
+						f_function
+						reload_menu;break;;
+			[Oo]	)	# show options menu
+						[ "$more" = "more" ] && more=less || more=more
+						if [ "$uiOptions" ]; then
+							diversion_lock "option ${RED_BG} $selection ${NC}"
+							uiOptions=$more;write_conf_file
+						fi
+						reload_menu;break;;
+			[Aa][Cc])	# Count ads
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						ac_function show
+						reload_menu;break;;
+			[Aa][Uu])	# Auto-count ads when opening UL
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						au_function
+						reload_menu;break;;
+			[Cc][Tt])	# Change theme
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						read_conf_file
+						ct_function;write_conf_file
+						reload_menu;break;;
+			[Dd][Ss])	# Dnsmasq settings
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						ds_function
+						reload_menu;break;;
+			[Ss][Ww])	# create or delete Swap file
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						sw_function
+						reload_menu;break;;
+			[Cc][Jj])	# show cron job(s)
+						print_red_line
+						get_file functions.div include >/dev/null
+						cj_function
+						reload_menu;break;;
+			[Ss][Ff])	# show file
+						print_red_line
+						get_file functions.div include >/dev/null
+						sf_function
+						reload_menu;break;;
+			[Ss][Hh])	# Shell history
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						sh_function
+						reload_menu;break;;
+			[Uu]	)	# check for update
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						get_file functions.div include >/dev/null
+						check_for_update
+						printf "\\n${INFO} Getting latest $SELF file\\n"
+						get_self new;d_function;break;;
+			[Uu][Uu])	# force update
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						action=update
+						printf "\\n${INFO} Force updating $NAME now\\n\\n${INFO} Getting latest $SELF file\\n"
+						get_self new;d_function;break;;
+			11		)	# hidden, restart app
+						reload_SELF;break;;
+			12		)	# hidden, get latest files without prompt
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						get_latest_files new
+						reload_menu;break;;
+			33		)	# hidden, get latest diversion script
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						printf "\\n${INFO} Getting latest $SELF file\\n"
+						get_self new;break;;
+			1233	)	# hidden, get latest diversion script and files without prompt
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						printf "\\n${INFO} Getting latest $SELF file\\n"
+						action=get-latest-files
+						get_self new;break;;
+			diversion|amtm)	print_red_line
+						printf "\\n${NOK} Gotcha!${INFO}${QUESTION}${ATTN}${OK}\\n"
+						sleep 3
+						d_show_info;reload_menu;break;;
+			reboot	)	# hidden, reboot router
+						diversion_lock "option ${RED_BG} $selection ${NC}"
+						print_red_line
+						echo " OK then, rebooting this router, are you sure?"
+						continue_dialog
+						clear
+						ascii_logo 'Rebooting...';break;;
+			[Ee]	)	clear
+						ascii_logo Goodbye;break;;
+			*		)	printf  "\\n                          input is not an option\\n\\n";;
+		esac
+		[ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock
+	done
+}
+
+d_function(){
+	if [ "$STATE" = "5" ] && [ -z "$action" ]; then
+		printf " $NAME options\\n\\n"
+
+		max=4
+		[ "$EDITION" = "Lite" ] && upg="Standard"
+		[ "$EDITION" = "Standard" ] && max=3
+
+		if [ "$DIVERSION_STATUS" = "enabled" ]; then
+			echo " 0. ${GREEN}Restart${NC}    $NAME"
+			echo " 1. ${RED}Disable${NC}    $NAME"
+			state=disable
+			echo " 2. Re-install $NAME $EDITION"
+			echo " 3. Update     $NAME $EDITION ${RED_BG} u ${NC} force upd ${RED_BG} uu ${NC}"
+			if [ "$max" = "4" ]; then
+				echo " 4. Upgrade    $NAME to $upg"
+			else
+				echo "${GRAY} 4. Upgrade    $NAME${NC}"
+			fi
+		else
+			echo "${GRAY} 0. Restart    $NAME${NC}"
+			echo " 1. ${GREEN}Enable${NC}     $NAME"
+			state=enable
+			echo "${GRAY} 2. Re-install $NAME $EDITION${NC}"
+			echo "${GRAY} 3. Update     $NAME $EDITION${NC}"
+			if [ "$max" = "4" ]; then
+				echo "${GRAY} 4. Upgrade    $NAME to $upg${NC}"
+			else
+				echo "${GRAY} 4. Upgrade    $NAME${NC}"
+			fi
+		fi
+
+		echo " 5. Info/About $NAME"
+		echo " 6. Uninstall  $NAME"
+
+		if [ "$DIVERSION_STATUS" = "enabled" ]; then
+			echo " 7. Reset      $NAME ads counter or logs"
+			[ "$localBackup" ] && lbtext="${GREEN}$lBuFrequency${NC}" || lbtext=options
+			echo " 8. Open       $NAME local backup $lbtext"
+		else
+			echo "${GRAY} 7. Reset      $NAME ads counter or logs${NC}"
+			echo "${GRAY} 8. Open       $NAME local backup${NC}"
+		fi
+
+		if [ "$uiOptions" ]; then
+			echo " 9. ${RED}Forget${NC}     $NAME UI last options view ${RED_BG} o ${NC}"
+		else
+			echo " 9. ${GREEN}Remember${NC}   $NAME UI last options view ${RED_BG} o ${NC}"
+		fi
+
+		check_diversion_status(){
+			if [ "$DIVERSION_STATUS" = "disabled" ]; then
+				lastError=" $NAME is disabled, enable it first"
+				reload_menu
+			fi
+		}
+
+		d_loop(){
+			action=
+			while true; do
+				printf "\\n Enter your selection [0-9 e=Exit] ";read -r continue
+				case "$continue" in
+					0)	if [ "$DIVERSION_STATUS" = "enabled" ]; then
+							on_off_diversion restart;reload_menu
+						else
+							lastError=" $NAME is disabled, enable it first"
+							reload_menu
+						fi;break;;
+					1)	on_off_diversion "$state";reload_menu;break;;
+					2)	check_diversion_status;action=re-install;break;;
+					3)	check_diversion_status;print_red_line
+						get_file functions.div include >/dev/null
+						check_for_update;break;;
+					4)	check_diversion_status;action=upgrade;break;;
+					5)	d_show_info;reload_menu;break;;
+					6)	print_red_line
+						printf "${ATTN} This removes $NAME from this router.\\n\\n"
+						printf "${INFO} To save essential $NAME files for\\n${SPACE} re-installing, use ${RED_BG} d ${NC} option 8 to create a\\n${SPACE} local backup before uninstalling.\\n"
+						localDivBackup=$(find /jffs/${NAME}_*_local_backup*.tar.gz 2> /dev/null)
+						if [ "$localDivBackup" ]; then
+							localRestoreEdition=$(echo $localDivBackup | cut -d _ -f 2)
+							localRestoreDate=$(echo $localDivBackup | cut -d _ -f 5-7 | sed "s~.tar.gz~~;s~_~ ~g;s~\.~:~g")
+							printf "\\n${INFO} Last $NAME $localRestoreEdition local backup in /jffs/\\n${SPACE} is from ${GREEN}$localRestoreDate${NC}\\n"
+						fi
+						continue_dialog
+						action=uninstall;break;;
+					7)	check_diversion_status;print_red_line
+						get_file functions.div include >/dev/null
+						d_reset;break;;
+					8)	check_diversion_status;get_file functions.div include >/dev/null
+						local_backup;break;;
+					9)	if [ "$uiOptions" ]; then
+							uiOptions=
+							more=more
+							lastAction=" Remember last options view disabled"
+						else
+							uiOptions=$more
+							lastAction=" Remember last options view enabled.\\n Set preferred view by entering ${NC}${RED_BG} o ${NC}"
+						fi
+						write_conf_file;reload_menu;break;;
+				 [Ee])	exit_message;reload_menu;break;;
+					*)	printf "\\n input is not an option\\n"
+						d_loop;return 1;;
+				esac
+			done
+			if [ "$max" = "3" ] && [ "$continue" = "4" ]; then
+				printf "\\n input is not an option\\n"
+				action=
+				d_loop;return 1
+			fi
+		}
+		d_loop
+
+		echo
+		if [ "$action" = "re-install" ]; then
+			printf "${INFO} Checking $SELF file\\n"
+			get_self check
+		elif [ "$action" = "uninstall" ]; then
+			print_red_line
+			printf " $NAME uninstall options\\n\\n"
+			echo " 1. Uninstall $NAME and Entware"
+			echo "    This option also removes Entware packages that"
+			echo "    may have been installed by third party scripts"
+			echo
+			echo " 2. Uninstall $NAME, leaving Entware installed"
+			while true; do
+				printf "\\n Enter your selection [1-2 e=Exit] ";read -r continue
+				case "$continue" in
+					1)	rmentware=1;break;;
+					2)	rmentware=0;break;;
+				 [Ee])	action=
+						exit_message;reload_menu;break;;
+					*)	printf "\\n input is not an option\\n";;
+				esac
+			done
+		else
+			printf "${INFO} Getting latest $SELF file\\n"
+			get_self new
+		fi
+	fi
+
+	trap action_aborted 1 2 3 6 15
+	action_aborted(){
+		printf "\\n\\n${NOK} Abort signal detected\\n"
+		printf "${SPACE} Aborting $action, cleaning up temp files...\\n"
+		[ "$0" != "/opt/bin/$SELF" ] && rm -f "$0"
+		rm -rf /tmp/diversion
+		trap - 1 2 3 6 15
+		reload_d_menu
+	}
+
+	reload_d_menu(){
+		[ -f "${DIVERSION_DIR}/log/${NAME}-${action}.log" ] && printf "\\n $NAME $action exited or aborted\\n" >>"${DIVERSION_DIR}/log/${NAME}-${action}.log"
+		action=
+		[ -f "${DIVERSION_DIR}/.conf/diversion.conf" ] && write_conf_file
+		write_message
+		exit 0
+	}
+
+	if [ "$action" = "install" ]; then
+		rm -rf /tmp/diversion
+		mkdir /tmp/diversion
+		echo
+
+		amtmTheme=$(find /jffs/ -name .amtm_theme)
+		if [ -f "$amtmTheme" ]; then
+			. "$amtmTheme"
+			THEME=$theme
+		fi
+		[ -z "$THEME" ] && THEME=local
+		theme_$THEME
+
+		[ "$THEME" != local ] && printf "${OK} Using theme set in amtm ($THEME)\\n\\n"
+		echo "${INFO} Getting latest installer file"
+		get_file install.div new /tmp/diversion
+		. /tmp/diversion/install.div
+		echo
+		echo "$NAME $action log $(date -R)" >/tmp/diversion/install.log
+		"$(echo print_red_line)" >>/tmp/diversion/install.log
+		install_diversion | tee -a /tmp/diversion/install.log
+
+		[ -f /tmp/diversion/action ] && . /tmp/diversion/action
+		if [ -d "${DIVERSION_DIR}/log" ]; then
+			mv /tmp/diversion/install.log "${DIVERSION_DIR}/log/${NAME}-${action}.log"
+		fi
+		[ -d /tmp/diversion ] && rm -rf /tmp/diversion
+
+		if [ -f "/opt/bin/$SELF" ]; then
+			reload_SELF
+		else
+			sh "$(cd "$(dirname "$0")"; pwd -P)/$SELF"
+			rm -f "$(cd "$(dirname "$0")"; pwd -P)/$SELF"
+		fi
+
+	elif [ "$action" = "get-latest-files" ]; then
+		get_latest_files new
+		action=
+		write_conf_file
+		reload_menu
+	elif [ "$action" = "uninstall" ]; then
+		get_file functions.div include
+		remove_diversion
+	else
+		echo "$NAME $action log $(date -R)" >"${DIVERSION_DIR}/log/${NAME}-${action}.log"
+		"$(echo print_red_line)" >>"${DIVERSION_DIR}/log/${NAME}-${action}.log"
+
+		if [ "$action" = "re-install" ]; then
+			rm -rf /tmp/diversion
+			mkdir /tmp/diversion
+			get_file install.div include
+			install_diversion | tee -a "${DIVERSION_DIR}/log/${NAME}-${action}.log"
+			[ -d /tmp/diversion ] && rm -rf /tmp/diversion
+
+		elif [ "$action" = "upgrade" ]; then
+			rm -rf /tmp/diversion
+			mkdir /tmp/diversion
+			echo "${INFO} Getting latest installer file"
+			get_file install.div new
+			get_file install.div include
+			install_diversion | tee -a "${DIVERSION_DIR}/log/${NAME}-${action}.log"
+			[ -d /tmp/diversion ] && rm -rf /tmp/diversion
+
+		else
+			echo "${INFO} Getting latest installer file"
+			get_file install.div new
+			get_file install.div include
+			update_diversion | tee -a "${DIVERSION_DIR}/log/${NAME}-${action}.log"
+
+		fi
+		reload_SELF
+	fi
+}
+
+d_show_info(){
+	print_red_line
+	echo " $TITLE
+ Version $VERSION $EDITION, released on $RELEASED
+
+ $NAME is a shell script application to manage
+ ad-blocking, Dnsmasq logging, Entware and
+ pixelserv-tls installations (and more) on Routers
+ running Asuswrt-Merlin firmware, including its forks.
+
+ For updates and discussion visit this thread:
+ https://www.snbforums.com/threads/diversion-the-router-ad-blocker.48538
+
+ Proudly coded by thelonelycoder:
+ Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+ https://www.snbforums.com/members/thelonelycoder.25480
+ https://diversion.ch
+
+ $NAME License:
+ $NAME is free to use under the GNU General Public License version 3 (GPL-3.0)
+ https://opensource.org/licenses/GPL-3.0
+
+ Follow Diversion on Twitter or Reddit:
+ https://twitter.com/DiversionBlock
+ https://www.reddit.com/r/diversion"
+	press_enter_to "return to Menu"
+}
+
+_curl(){ /usr/sbin/curl -s --location --connect-timeout 10 --retry 3 "$@";}
+dos_to_unix(){ dos2unix < $1 | cmp -s - $1;[ "$?" = "1" ] && dos2unix $1;}
+exit_message(){ lastAction=" Option Exit selected";}
+human_number(){ sed -re " :restart ; s/([0-9])([0-9]{3})($|[^0-9])/\1,\2\3/ ; t restart ";}
+large_number(){ [ "$1" -lt "1000000" ] && num="$(echo "$1" | human_number)" || num="$(awk -v sum="$1" 'BEGIN{{sum};hum[1000**3]="B";hum[1000**2]="M";hum[1000]="K";	for (x=1000**3; x>=1000; x/=1000){if (sum>=x) { printf "%.3f%s\n",sum/x,hum[x];break }}}')";}
+press_enter_to(){ printf "\\n${ATTN} Press Enter to $1 ";read -r;echo;}
+print_red_line(){ echo "${RED_LINE}____________________________________________________${NC}";echo;}
+read_conf_file(){ . "${DIVERSION_DIR}/.conf/diversion.conf";}
+reload_SELF(){ [ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock;exec "/opt/bin/$SELF";}
+reload_menu(){ [ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock;acOff=1;state_check;show_menu;}
+restart_DNSMASQ(){ service restart_dnsmasq >/dev/null;}
+theme_local(){ RED_LINE='[0;31m';NC='[0m';OK=" [✔]";NOK=" [✖]";INFO=" [i]" QUESTION=" [?]";ATTN=" [!]";DONE=" [Done]";ERR=" [Error]";SPACE="    ";}
+theme_standard(){ RED='[31m';RED_LINE='[31m';RED_BG='[41m';ERR_BG='[41m';GREEN='[92m';GREEN_BG='[42m';YELLOW='[93m';BLUE='[94m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${RED_BG} Error ${NC}";SPACE="    ";DCORR=39;}
+theme_green(){ RED='[31m';RED_LINE='[33m';RED_BG='[42m';ERR_BG='[41m';GREEN='[92m';GREEN_BG='[42m';YELLOW='[33m';BLUE='[94m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${ERR_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=39;}
+theme_blue(){ RED='[31m';RED_LINE='[34m';RED_BG='[44m';ERR_BG='[101m';GREEN='[94m';GREEN_BG='[104m';YELLOW='[33m';BLUE='[38;5;112m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${ERR_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=39;}
+theme_blue_on_white(){ RED='[31m';RED_LINE='[34m';RED_BG='[104m';ERR_BG='[101m';GREEN='[94m';GREEN_BG='[104m';YELLOW='[33m';BLUE='[38;5;112m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${ERR_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=40;}
+theme_high_contrast(){ RED='[91m';RED_LINE='[91m';RED_BG='[41m';ERR_BG='[41m';GREEN='[32m';GREEN_BG='[42m';YELLOW='[33m';BLUE='[38;5;51m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=39;}
+theme_reduced(){ RED='[31m';RED_LINE='[31m';RED_BG='[100m';ERR_BG='[100m';GREEN='[37m';GREEN_BG='[100m';YELLOW='[37m';BLUE='[37m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=40;}
+theme_reduced_w(){ RED='[31m';RED_LINE='[31m';RED_BG='[97;40m';ERR_BG='[97;40m';GREEN='[32m';GREEN_BG='[97;40m';YELLOW='[30m';BLUE='[30m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=42;}
+theme_reduced_cw(){ RED='[31m';RED_LINE='[31m';RED_BG='[97;40m';ERR_BG='[97;41m';GREEN='[32m';GREEN_BG='[30;42m';YELLOW='[30m';BLUE='[30m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=42;}
+theme_reduced_b(){ RED='[38;5;209m';RED_LINE='[38;5;209m';RED_BG='[100m';ERR_BG='[100m';GREEN='[38;5;157m';GREEN_BG='[100m';YELLOW='[37m';BLUE='[37m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=40;}
+theme_reduced_cb(){ RED='[31m';RED_LINE='[31m';RED_BG='[100m';ERR_BG='[30;41m';GREEN='[38;5;157m';GREEN_BG='[30;42m';YELLOW='[37m';BLUE='[37m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=40;}
+theme_basic(){ RED=;RED_LINE='[31m';RED_BG=;ERR_BG=;GREEN=;GREEN_BG=;YELLOW=;BLUE=;GRAY='[90m';NC='[0m';OK=" [✔]";NOK=" [✖]";INFO=" [i]";QUESTION=" [?]";ATTN=" [!]";DONE=" [Done]";ERR=" [Error]";SPACE="     ";DCORR=34;}
+trim_file(){ sed -i '/^[[:space:]]*$/d' "$1"; [ -n "$(tail -c1 "$1")" ] && echo >> "$1";}
+write_conf_file(){ get_file write-config.div include;write_conf;}
+write_message(){ echo "lastAction=\"$lastAction\"" >/tmp/divmessage;echo "lastError=\"$lastError\"" >>/tmp/divmessage;}
+
+a_function(){
+	read_conf_file
+	if [ "$adblocking" = "on" ]; then
+		adblocking=off
+		[ "$psState" = "on" ] && on_off_pixelserv off
+		write_conf_file
+		lastAction=" ad-blocking disabled"
+	elif [ -z "$adblocking" ] || [ "$adblocking" = "off" ]; then
+		adblocking=on
+		[ "$prevPsState" = "on" ] && psState=on
+		write_conf_file
+		on_off_pixelserv on
+		lastAction=" ad-blocking enabled"
+	fi
+	[ "$bm" = ssh ] && echo "${OK}$lastAction"
+	[ "$bm" = ios ] && echo "✔$lastAction"
+	restart_DNSMASQ
+}
+
+ac_function(){
+	if /opt/bin/grep -wq "log-facility" /etc/dnsmasq.conf; then
+		if [ -f "${LOG_DIR}/dnsmasq.log" ]; then
+			if [ -f "/tmp/div_lock_ac" ]; then
+				sleep 4
+				echo "$$" > "/tmp/div_lock_ac"
+				for process in $(ps -T | grep 'diversion ac\|diversion count_ads' | grep -v 'grep ' | awk '{print $1}'); do
+					[ "$process" != "$(sed -n '1p' /tmp/div_lock_ac)" ] && kill "$process" 2> /dev/null
+				done
+			else
+				echo "$$" > "/tmp/div_lock_ac"
+			fi
+			read_conf_file
+
+			if [ "$EN" -ge "2" ];then
+				this_blockingIP="is $psIP\|is 0.0.0.0"
+				[ "$LANblockingIP" ] && this_blockingIP="is $psIP\|is 0.0.0.0\|is $lanBIP"
+			else
+				this_blockingIP="is 0.0.0.0"
+				[ "$LANblockingIP" ] && this_blockingIP="is 0.0.0.0\|is $lanBIP"
+			fi
+
+			[ "$adsCountLM" = '' ] && adsCountLM=diversion-ads-counter
+			if /opt/bin/grep -q -m1 "$adsCountLM" ${LOG_DIR}/dnsmasq.log; then
+				adsNew=$(sed -n "/$adsCountLM/,\$p" ${LOG_DIR}/dnsmasq.log | /opt/bin/grep -c "$this_blockingIP")
+			else
+				adsNew=$(/opt/bin/grep -c "$this_blockingIP" ${LOG_DIR}/dnsmasq.log)
+			fi
+			adsCountLM=$(tail -1 /opt/var/log/dnsmasq.log | sed -e 's~\/~\\/~g;s/\]/\\]/g;s/\[/\\[/g')
+			adsBlocked=$((adsNew+adsBlocked))
+			adsWeek=$((adsNew+adsWeek))
+
+			if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+				[ "$adsCountAltLM" = '' ] && adsCountAltLM=diversion-ads-counter
+				if /opt/bin/grep -q -m1 "$adsCountAltLM" ${LOG_DIR}/dnsmasq.log3; then
+					adsNewAlt=$(sed -n "/$adsCountAltLM/,\$p" ${LOG_DIR}/dnsmasq.log3 | /opt/bin/grep -c "$this_blockingIP")
+				else
+					adsNewAlt=$(/opt/bin/grep -c "$this_blockingIP" ${LOG_DIR}/dnsmasq.log3)
+				fi
+				adsCountAltLM=$(tail -1 /opt/var/log/dnsmasq.log3 | sed -e 's~\/~\\/~g;s/\]/\\]/g;s/\[/\\[/g')
+				adsBlockedAlt=$((adsNewAlt+adsBlockedAlt))
+				adsWeekAlt=$((adsNewAlt+adsWeekAlt))
+			fi
+
+			[ -z "$adsPrevCount" ] && adsPrevCount=$(date +"%b %d %R") || adsPrevCount=$adsLastCount
+			adsLastCount=$(date +"%b %d %R")
+
+			# Positional parameters: 1: show in UI, 2: reset weekly counter
+			if [ "$1" = "show" ]; then
+				if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+					lastAction=" updated ads counter, Primary ad-blocking:"
+					lastAction="$lastAction\\n $(echo $adsBlocked | human_number) total, $(echo $adsWeek | human_number) this week, $(echo $adsNew | human_number) new"
+					lastAction="$lastAction\\n Alternate ad-blocking:"
+					lastAction="$lastAction\\n $(echo $adsBlockedAlt | human_number) total, $(echo $adsWeekAlt | human_number) this week, $(echo $adsNewAlt | human_number) new"
+				else
+					lastAction=" updated ads counter: $(echo $adsBlocked | human_number) total,"
+					lastAction="$lastAction\\n $(echo $adsWeek | human_number) this week, $(echo $adsNew | human_number) new since last count"
+				fi
+			elif [ "$2" = "sh" ]; then
+				if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+					printf "Primary ad-blocking\\ntotal ads blocked\\n$(echo $adsBlocked | human_number)\\nthis week\\n$(echo $adsWeek | human_number)\\nnew since last count\\n$(echo $adsNew | human_number)"
+					printf "\\n\\nAlternate ad-blocking\\ntotal ads blocked\\n$(echo $adsBlockedAlt | human_number)\\nthis week\\n$(echo $adsWeekAlt | human_number)\\nnew since last count\\n$(echo $adsNewAlt | human_number)"
+				else
+					printf "Total ads blocked\\n$(echo $adsBlocked | human_number)\\nThis week\\n$(echo $adsWeek | human_number)\\nNew since last count\\n$(echo $adsNew | human_number)"
+				fi
+			elif [ "$2" = "reset" ]; then
+				if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+					logger -t Diversion "updated and reset weekly ads counter: $(echo $((adsBlocked+adsBlockedAlt)) | human_number) total, $(echo $((adsWeek+adsWeekAlt)) | human_number) this week, $(echo $((adsNew+adsNewAlt)) | human_number) new since last count"
+					adsWeek=0
+					adsWeekAlt=0
+				else
+					logger -t Diversion "updated and reset weekly ads counter: $(echo $adsBlocked | human_number) total, $(echo $adsWeek | human_number) this week, $(echo $adsNew | human_number) new since last count"
+					adsWeek=0
+				fi
+			elif [ "$2" = "count" ]; then
+				if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+					logger -t Diversion "updated ads counter: $(echo $((adsBlocked+adsBlockedAlt)) | human_number) total, $(echo $((adsWeek+adsWeekAlt)) | human_number) this week, $(echo $((adsNew+adsNewAlt)) | human_number) new since last count"
+				else
+					logger -t Diversion "updated ads counter: $(echo $adsBlocked | human_number) total, $(echo $adsWeek | human_number) this week, $(echo $adsNew | human_number) new since last count"
+				fi
+			fi
+			write_conf_file
+			rm -f "/tmp/div_lock_ac"
+		else
+			lastError=" dnsmasq.log not found, cannot count ads"
+			logger -t Diversion "dnsmasq.log not found, cannot count ads"
+		fi
+	else
+		lastError=" logging is disabled, cannot count ads"
+		logger -t Diversion "logging is disabled, cannot count ads"
+	fi
+}
+
+check_ps_version(){
+	psVersion="$(pixelserv-tls -v | awk 'NR == 1 {print $2}')"
+	[ -z "$psVersion" ] && psVersion="likely v.Kk"
+	case $psVersion in
+	  v*|*v.K*) ;;
+	  * ) psVersion="v$psVersion" ;;
+	esac
+
+	if [ "$psColor" = "${GREEN}" ] && [ -z "$(pidof pixelserv-tls)" ]; then
+		psColor="${RED}"
+		psVersion="(${RED}not running${NC})"
+	fi
+}
+
+check_swap(){
+	writeswaploc(){
+		if ! /opt/bin/grep -q 'do-not-check-swap' /jffs/scripts/post-mount 2> /dev/null; then
+			sed -i '\~swapon ~d' /jffs/scripts/post-mount
+			sed -i "2i swapon $swaplocation # Added by $NAME" /jffs/scripts/post-mount
+			swapon "$swaplocation" 2> /dev/null
+			sed -i '/swapoff/d' /jffs/scripts/unmount >/dev/null
+			swapsize=$(du -h "$swaplocation" | awk '{print $1}')
+			trim_file /jffs/scripts/unmount
+			echo "[ \"\$(/usr/bin/find \$1/$(basename $swaplocation) 2> /dev/null)\" ] && swapoff \$1/$(basename $swaplocation) # Added by $NAME" >> /jffs/scripts/unmount
+		fi
+	}
+	remove_swap_entries(){
+		if /opt/bin/grep -q 'swapon.*\.' /jffs/scripts/post-mount && ! /opt/bin/grep -q 'do-not-check-swap' /jffs/scripts/post-mount; then
+			sed -i '\~swapon ~d' /jffs/scripts/post-mount
+			sed -i '/swapoff/d' /jffs/scripts/unmount >/dev/null
+			swtext=" No swap file found, reference removed in\\n /jffs/scripts/post-mount"
+		fi
+	}
+
+	if [ "$(echo "$swaplocation" | wc -l)" -gt "1" ]; then
+		multipleswap=1
+		swtext=" Multiple swap files found, only one file is\\n supported. Enter sw to delete."
+	elif [ -f "$swaplocation" ]; then
+		if ! /opt/bin/grep -qF "$swaplocation" /proc/swaps; then
+			swapon "$swaplocation" 2> /dev/null
+			swtext=" Swap file re-enabled"
+		fi
+		swapsize=$(du -h "$swaplocation" | awk '{print $1}')
+	elif [ "$swaplocation" ] && [ "$swaplocation" = "$(sed -n '2p' /proc/swaps | awk '{print $1}')" ]; then
+		partitionsize="$((($(sed -n '2p' /proc/swaps | awk '{print $3}') + (1024 + 1)) / 1024))"
+	elif [ -f /jffs/configs/fstab ] && /opt/bin/grep -qF "swap" /jffs/configs/fstab && [ "$(wc -l < /proc/swaps)" -eq "2" ]; then
+		partitionsize="$((($(sed -n '2p' /proc/swaps | awk '{print $3}') + (1024 + 1)) / 1024))"
+		swaplocation="$(sed -n '2p' /proc/swaps | awk '{print $1}')"
+	elif [ "$swaplocation" ]; then
+		swaplocation="$(find /tmp/mnt/*/$(basename $swaplocation) 2> /dev/null)"
+		if [ -f "$swaplocation" ]; then
+			writeswaploc
+			swtext=" Swap file path corrected in\\n /jffs/scripts/post-mount"
+		else
+			swaplocation="$(find /tmp/mnt/*/myswap.swp 2> /dev/null)"
+			if [ -f "$swaplocation" ]; then
+				writeswaploc
+				swtext=" Added missing swap file entry to\\n /jffs/scripts/post-mount"
+			elif [ "$(wc -l < /proc/swaps)" -eq "2" ]; then
+				swaplocation="$(sed -n '2p' /proc/swaps | awk '{print $1}')"
+				if [ -f "$swaplocation" ]; then
+					writeswaploc
+					swtext=" Added missing swap file entry to\\n /jffs/scripts/post-mount"
+				else
+					remove_swap_entries
+				fi
+			else
+				remove_swap_entries
+			fi
+		fi
+	else
+		swaplocation="$(find /tmp/mnt/*/myswap.swp 2> /dev/null)"
+		if [ "$(echo "$swaplocation" | wc -l)" -gt "1" ]; then
+			multipleswap=1
+			swtext=" Multiple swap files found, only one file is\\n supported. Enter sw to delete."
+		elif [ -f "$swaplocation" ]; then
+			writeswaploc
+			swtext=" Added missing swap file entry to\\n /jffs/scripts/post-mount"
+		elif [ "$(wc -l < /proc/swaps)" -eq "2" ]; then
+			swaplocation="$(sed -n '2p' /proc/swaps | awk '{print $1}')"
+			if [ -f "$swaplocation" ]; then
+				writeswaploc
+				swtext=" Added missing swap file entry to\\n /jffs/scripts/post-mount"
+			else
+				remove_swap_entries
+			fi
+		elif [ "$swaplocation" ] || [ "$(wc -l < /proc/swaps)" -gt "2" ]; then
+			multipleswap=1
+			swtext=" Multiple swap files found, only one file is\\n supported. Enter sw to delete."
+		fi
+	fi
+}
+
+continue_dialog(){
+	while true; do
+		printf "\\n Continue? [1=Yes e=Exit] ";read -r continue
+		case "$continue" in
+			1)	break;;
+		 [Ee])	exit_message;reload_menu;break;;
+			*)	printf "\\n input is not an option\\n\\n";;
+		esac
+	done
+}
+
+ct_function(){
+	print_the_line(){ echo "${RED_LINE}____________________________________________________${NC}";}
+	if [ -z "$1" ]; then
+		printf " This changes the $NAME theme.\\n All used colors are shown in the themes below.\\n"
+		printf "\\n Your current theme is: ${RED_BG} $THEME ${NC}\\n\\n"
+	else
+		print_red_line
+		printf "${QUESTION} Select a theme that works best in your\\n${SPACE} SSH client. All colors in use are shown.\\n\\n"
+	fi
+
+	themes='standard green blue blue_on_white high_contrast reduced reduced_w reduced_cw reduced_b reduced_cb'
+	i=1
+	for theme in $themes; do
+		ncorr=' '
+		case $theme in
+			blue)			corr5=+1;corr6=+1;;
+			blue_on_white)	corr3=-1;corr2=-1;corr4=-1;;
+			reduced)		corr3=-1;corr2=-1;corr4=-1;;
+			reduced_w)		corr3=-3;corr2=-3;corr4=-3;;
+			reduced_cw)		corr3=-3;corr2=-3;corr4=-3;;
+			reduced_b)		corr3=+5;corr2=+5;corr4=-1;;
+			reduced_cb)		ncorr=;corr2=-1;corr5=+2;corr3=+5;corr6=+2;corr4=-1;;
+		esac
+		theme_$theme
+		printf "%-$((DCORR-16$corr1))s %-$((DCORR-15$corr2))s %-$((DCORR-6))s\\n" "${RED_BG}$ncorr$i. $theme" "${NC} ${RED} $theme" "${NC}${OK}${NOK}${DONE}"
+		printf "   %-$((DCORR-19$corr5))s %-$((DCORR-15$corr3))s %-s\\n" "${ERR_BG} $theme" "${NC} ${GREEN} $theme" "${NC}${INFO}${QUESTION}${ERR}"
+		printf "   %-$((DCORR-19$corr6))s %-$((DCORR-14$corr4))s %-s\\n" "${GREEN_BG} $theme" "${NC} ${YELLOW} $theme" "${NC}${BLUE}$theme${NC}"
+		print_red_line
+		i=$((i+1))
+		unset corr1 corr2 corr3 corr4 corr5 corr6 ncorr
+	done
+	theme_basic
+	printf "${RED_BG}11. basic          ${NC}${RED}  basic         ${NC}${OK}${NOK}${DONE}\\n"
+	printf "   ${ERR_BG} basic          ${NC}${GREEN}  basic         ${NC}${INFO}${QUESTION}${ERR}\\n"
+	print_the_line
+
+	printf "\\n The basic and reduced themes use no or fewer\\n"
+	printf " colors, service states may not be visible.\\n"
+
+	theme_standard
+
+	while true;do
+		if [ -z "$1" ]; then
+			printf "\\n Set new theme: [1-11 e=Exit] ";read -r continue
+		else
+			printf "\\n Select $NAME theme: [1-11] ";read -r continue
+		fi
+		case "$continue" in
+			1) THEME=standard;break;;
+			2) THEME=green;break;;
+			3) THEME=blue;break;;
+			4) THEME=blue_on_white;break;;
+			5) THEME=high_contrast;break;;
+			6) THEME=reduced;break;;
+			7) THEME=reduced_w;break;;
+			8) THEME=reduced_cw;break;;
+			9) THEME=reduced_b;break;;
+			10) THEME=reduced_cb;break;;
+			11) THEME=basic;break;;
+		 [Ee]) 	if [ -z "$1" ]; then
+					exit_message;reload_menu
+				else
+					printf "\\n input is not an option\\n"
+				fi
+				;;
+			*)	printf "\\n input is not an option\\n";;
+		esac
+	done
+
+	if [ -z "$1" ]; then
+		lastAction=" changed theme to $THEME"
+		write_conf_file
+	else
+		theme_$THEME
+		echo
+	fi
+}
+
+diversion_help(){
+	echo " Usage: diversion [option]
+ Example: 'diversion disable'
+ Example: 'diversion' (no option) opens full SSH UI
+
+	a or adblocking		disables/enables ad-blocking
+	ac or count_ads		counts newly blocked ads
+
+	bu			updates the blocking list
+	disable			disables all $NAME services
+	enable			enables active $NAME services
+
+	f or follow		tails (follows) the Dnsmasq log file
+	fs			fast switches between blocking lists
+	h or help		opens this help menu
+	l or logging		disables/enables logging
+
+	unmount			stops $NAME and Entware services when disk is ejected through WebUI
+				this action is done automatically trough /jffs/scripts/unmount
+
+	mount			starts $NAME and Entware services after unmount
+				this action is done automatically trough /jffs/scripts/dnsmasq.postconf
+
+	restart			restarts all active $NAME services
+	";
+}
+
+diversion_unlock(){
+	if [ -f /tmp/diversion.lock ] && [ -d "/proc/$(sed -n '2p' /tmp/diversion.lock)" ]; then
+		logger -st Diversion "Killing locked $NAME processes ($(sed -n '1p' /tmp/diversion.lock)) (pid=$(sed -n '2p' /tmp/diversion.lock))"
+		logger -st Diversion "$(ps | awk -v pid="$(sed -n '2p' /tmp/diversion.lock)" '$1 == pid')"
+		kill "$(sed -n '2p' /tmp/diversion.lock)"
+		rm -rf /tmp/diversion.lock
+		echo
+	fi
+}
+
+diversion_lock(){
+	if [ -f /tmp/diversion.lock ] && [ -d "/proc/$(sed -n '2p' /tmp/diversion.lock)" ] && [ "$(sed -n '2p' /tmp/diversion.lock)" != "$$" ]; then
+		if [ "$(($(date +%s)-$(sed -n '3p' /tmp/diversion.lock)))" -gt "1800" ]; then
+			diversion_unlock
+		elif [ "$menuActive" = 1 ]; then
+			lastError=" lock file found, ${NC}$(sed -n '1p' /tmp/diversion.lock) active"
+			rmdiversionlock=no
+			reload_menu
+		else
+			[ "$bm" = ssh ] && printf "\\n${NOK} lock file found, $(sed -n '1p' /tmp/diversion.lock) active\\n\\n"
+			[ "$bm" = ios ] && echo "✖ lock file found, $(sed -n '1p' /tmp/diversion.lock | cut -f 1,3 -d ' ') active"
+			exit 1
+		fi
+	fi
+	echo "$@" > /tmp/diversion.lock
+	echo "$$" >> /tmp/diversion.lock
+	date +%s >> /tmp/diversion.lock
+	rmdiversionlock=yes
+}
+
+follow_dnsmasq(){
+	if ! /opt/bin/grep -wq "log-facility" /etc/dnsmasq.conf; then
+		echo "${NOK} Logging is disabled"
+		echo
+		exit 0
+	fi
+
+	follow_dnsmasq_alternate_bl
+
+	echo "${INFO} Press Ctrl-C to exit"
+	echo
+
+	tail -F "${LOG_DIR}/dnsmasq.$log" | sed -E \
+	-e "s,($(date +'%b %d ')| dnsmasq[.*[0-9]]),,g" \
+	-e "s,/opt/share/diversion/list/,blocked by ,g" \
+	-e "/is $blockingIP/ s/ config / blocked by wc-blacklist /" \
+	-e "s,(.*(blockinglist|blacklist| wc-blacklist ).* is ${blockingIP}.*),${RED}&${NC}," \
+	-e "s,.*(query\\[A|DHCP).*,${NC}&${NC}," \
+	-e "s,.*,${GRAY}&${NC},"
+}
+
+follow_dnsmasq_alternate_bl(){
+	log=log
+	if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+		printf "${ATTN} Alternate blocking list is active.\\n\\n"
+		printf " 1. Follow standard blocking list\\n"
+		printf " 2. Follow alternate blocking list\\n"
+		while true; do
+			printf "\\n Enter your selection [1-2 e=Exit] ";read -r continue
+			case "$continue" in
+				1)	break;;
+				2)	log=log3;break;;
+			 [Ee])	exit_message;reload_menu;break;;
+				*)	printf "\\n input is not an option\\n\\n";;
+			esac
+		done
+		printf "\\n Following ${LOG_DIR}/dnsmasq.$log\\n\\n"
+	fi
+}
+
+fs_function(){
+	if [ "$bfFs" = "on" ]; then
+		read_conf_file
+		if [ "$bfTypeinUse" = "primary" ]; then
+			bfTypeinUse=secondary
+			lastAction=" Secondary blocking list ($bfTypeFs) active"
+		elif [ "$bfTypeinUse" = "secondary" ]; then
+			bfTypeinUse=primary
+			lastAction=" Primary blocking list ($bfType) active"
+		fi
+		[ "$bm" = ssh ] && echo "${OK}$lastAction"
+		[ "$bm" = ios ] && echo "✔$lastAction"
+		logger -t Diversion "$bfTypeinUse blocking list is now active"
+		write_conf_file
+		restart_DNSMASQ
+
+		if [ "$SkynetFs" = "on" ]; then
+			if [ -f "/jffs/scripts/firewall" ] && /opt/bin/grep -q "sh /jffs/scripts/firewall" /jffs/scripts/firewall-start 2> /dev/null; then
+
+				skynetcfg="$(grep -ow "skynetloc=.* # Skynet" /jffs/scripts/firewall-start 2>/dev/null | grep -vE "^#" | awk '{print $1}' | cut -c 11-)/skynet.cfg"
+				grep "customlist2url" "$skynetcfg" >/tmp/diversion-skynet
+				grep "fastswitch" "$skynetcfg" >>/tmp/diversion-skynet
+				. /tmp/diversion-skynet
+
+				if [ "$customlist2url" ]; then
+					if [ -f /tmp/diversion.lock ]; then
+						lastAction="${lastAction}.\\nSkynet lock file found, no fast switch change"
+						[ "$bm" = ssh ] && echo "${NOK} Skynet lock file found, no fast switch change"
+					else
+						if [ "$bfTypeinUse" = "primary" ] && [ "$fastswitch" = "enabled" ]; then
+							sh /jffs/scripts/firewall fs >/dev/null &
+							text="Skynet fast switch has been disabled"
+							lastAction="${lastAction}.\\n$text"
+							[ "$bm" = ssh ] && echo "${OK} $text"
+							logger -t Diversion "$text"
+						elif [ "$bfTypeinUse" = "secondary" ] && [ "$fastswitch" = "disabled" ]; then
+							sh /jffs/scripts/firewall fs >/dev/null &
+							text="Skynet fast switch has been enabled"
+							lastAction="${lastAction}.\\n$text"
+							[ "$bm" = ssh ] && echo "${OK} $text"
+							logger -t Diversion "$text"
+						else
+							lastAction="${lastAction}.\\nSkynet fast switch already in $fastswitch mode"
+							[ "$bm" = ssh ] && echo "${OK} Skynet fast switch already in $fastswitch mode"
+						fi
+					fi
+				else
+					lastAction="${lastAction}.\\nSkynet fast switch not configured"
+					[ "$bm" = ssh ] && echo "${NOK} Skynet fast switch not configured"
+				fi
+				rm -f /tmp/diversion-skynet
+			fi
+		fi
+
+	else
+		lastError=" blocking list fast switch is not enabled"
+		[ "$bm" = ssh ] && echo "${NOK}$lastError"
+		[ "$bm" = ios ] && echo "✖$lastError"
+	fi
+}
+
+get_file(){
+	[ -z "$3" ] && set -- "$1" "$2" "${DIVERSION_DIR}/file" "$4" "$5"
+	[ -z "$4" ] && set -- "$1" "$2" "$3" "/file/" "$5"
+	# Positional parameters: 1: File, 2: Action, 3: Save to, 4: Get from, 5: Copy to
+	faok=
+	if [ "$2" = "new" ]; then
+		_curl "$DIVERSION_URL/${VERSION:0:3}$4$1" -o "$3/${1}.new"
+		if [ -s "$3/${1}.new" ]; then
+			if grep -wq '^#bof' "$3/${1}.new" && grep -wq '^#eof' "$3/${1}.new"; then
+				mv -f "$3/${1}.new" "$3/$1"
+				if [ "$5" ] && [ -d "$5" ]; then
+					cp "$3/$1" "$5/$1"
+				fi
+				printf "${OK} %-20s%s\\n" "$1 " "integrated"
+				faok=ok
+			elif [ -f "$3/$1" ]; then
+				rm -f "$3/${1}.new"
+				if [ "$5" ] && [ -d "$5" ]; then
+					cp "$3/$1" "$5/$1"
+				fi
+				if [ "$action" = "update" ] || [ "$action" = "upgrade" ]; then
+					echo "${NOK} $1 is not a $NAME file"
+					lastError=" $1 is not a $NAME file,\\n Run $action again."
+					action=
+					write_conf_file
+					reload_menu
+				else
+					echo "${NOK} $1 is not a $NAME file,"
+					echo "${SPACE} using existing file"
+					lastError=" $1 is not a $NAME file,\\n using existing file"
+				fi
+			else
+				rm -f "$3/${1}.new"
+				echo "${NOK} $1 is not a $NAME file"
+				faok=nok
+				lastError=" $1 is not a $NAME file,\\n Run function again."
+				action=
+				write_conf_file
+				reload_menu
+			fi
+		elif [ -f "$3/$1" ]; then
+			rm -f "$3/${1}.new"
+			if [ "$5" ] && [ -d "$5" ]; then
+				cp "$3/$1" "$5/$1"
+			fi
+			if [ "$action" = "update" ] || [ "$action" = "upgrade" ]; then
+				echo "${NOK} $1 download failed"
+				lastError=" $1 download failed,\\n Run $action again."
+				action=
+				write_conf_file
+				reload_menu
+			else
+				echo "${NOK} $1 download failed,"
+				echo "${SPACE} using existing file"
+				lastError=" $1 download failed,\\n using existing file"
+			fi
+		else
+			rm -f "$3/${1}.new"
+			echo "${NOK} $1 download failed"
+			faok=nok
+			lastError=" $1 download failed,\\n Run function again."
+			action=
+			write_conf_file
+			reload_menu
+		fi
+	fi
+	if [ "$2" = "check" ]; then
+		if [ -f "$3/$1" ]; then
+			if ! grep -wq '^#bof' "$3/$1" && ! grep -wq '^#eof' "$3/$1"; then
+				get_file "$1" new "$3" "$4" "$5"
+			fi
+			if [ "$5" ] && [ -d "$5" ]; then
+				cp "$3/$1" "$5/$1"
+			fi
+			[ "$fa" = "check" ] && echo "${OK} $1"
+			faok=ok
+		else
+			get_file "$1" new "$3" "$4" "$5"
+		fi
+	fi
+	if [ "$2" = "include" ]; then
+		if [ -f "$3/$1" ]; then
+			. "$3/$1"
+		else
+			get_file "$1" new "$3" "$4" "$5"
+			. "$3/$1"
+		fi
+	fi
+}
+
+get_latest_files(){
+	if [ "$fa" = "check" ]; then
+		printf "\\n${INFO} Checking $NAME $EDITION files\\n"
+	else
+		printf "\\n${INFO} Getting $NAME $EDITION files\\n${SPACE} from $(echo $DIVERSION_URL | awk -F[/:] '{print $4}')\\n"
+	fi
+	[ "$alternateBF" ] && get_file alternate-bf.div "$1"
+	get_file ash-history.div "$1"
+	[ "$backup" ] || [ -f "${DIVERSION_DIR}/file/backup.div" ] && get_file backup.div "$1"
+	get_file functions.div "$1"
+	[ "$devEnv" ] && get_file functions.local "$1"
+	[ "$action" != "upgrade" ] && [ "$action" != "update" ] && get_file install.div "$1"
+	get_file mount-entware.div "$1" "${DIVERSION_DIR}/file" /file/ /jffs/addons/diversion
+	get_file post-conf.div "$1"
+	[ "$EN" -ge "2" ] && get_file rc.func.div "$1" "${DIVERSION_DIR}/file" /file/ /opt/etc/init.d/
+	get_file rotate-logs.div "$1"
+	[ "$EN" -ge "2" ] && get_file S80pixelserv-tls "$1" "${DIVERSION_DIR}/file" /file/ /opt/etc/init.d/
+	[ "$weeklyStats" ] || [ -f "${DIVERSION_DIR}/file/stats.div" ] && get_file stats.div "$1"
+	[ "$divUpdate" = "on" ] && get_file update.div "$1"
+	get_file update-bl.div "$1"
+	[ "$fwUpdate" = "on" ] && get_file update-notification "$1" "${DIVERSION_DIR}/file" /file/ /jffs/scripts/
+	get_file write-config.div "$1"
+	set_file_permissions
+}
+
+get_self(){
+	get_file "$SELF" "$1" "/opt/bin" "/"
+	if [ "$faok" = "ok" ]; then
+		[ "$1" = "check" ] && echo "${OK} $SELF"
+		set_file_permissions
+		write_conf_file
+		reload_SELF
+	else
+		reload_menu
+	fi
+}
+
+l_function(){
+	read_conf_file
+	if [ "$logging" = "on" ]; then
+		logging=off
+		lastAction=" logging disabled"
+	elif [ -z "$logging" ] || [ "$logging" = "off" ]; then
+		read_conf_file
+		logging=on
+		lastAction=" logging enabled"
+	fi
+	[ "$bm" = ssh ] && echo "${OK}$lastAction"
+	[ "$bm" = ios ] && echo "✔$lastAction"
+	write_conf_file
+	restart_DNSMASQ
+}
+
+on_off_diversion(){
+	if [ "$DIVERSION_STATUS" = "enabled" ] && [ "$1" = "disable" ]; then
+		read_conf_file
+		[ "$psState" = "on" ] && on_off_pixelserv off
+		DIVERSION_STATUS=disabled
+		write_conf_file
+		restart_DNSMASQ
+		lastAction=" $NAME services disabled"
+	elif [ "$DIVERSION_STATUS" = "enabled" ] && [ "$1" = "unmount" ]; then
+		logger -t Diversion "disabling services for unmount"
+		read_conf_file
+		/opt/etc/init.d/rc.unslung stop >/dev/null
+		[ "$psState" = "on" ] && ifconfig br0:pixelserv-tls $psIP down
+		DIVERSION_STATUS=disabled
+		UNMOUNT_STATUS=unmounted
+		cat <<-EOF > "/tmp/diversion-unmount"
+				#!/bin/sh
+				sleep 2
+				[ "\$(pidof amtm)" ] && kill \$(pidof amtm)
+				[ "\$(pidof diversion)" ] && kill \$(pidof diversion)
+				sleep 8
+				rm -f /tmp/diversion-unmount
+				EOF
+		sh /tmp/diversion-unmount >/dev/null &
+		write_conf_file
+		restart_DNSMASQ
+		lastAction=" $NAME services unmounted"
+		[ "$bm" = ssh ] && echo "${OK}$lastAction"
+		[ "$bm" = ios ] && echo "✔$lastAction"
+		echo
+		exit 0
+	elif [ "$DIVERSION_STATUS" = "disabled" ] && [ "$1" = "mount" ]; then
+		logger -t Diversion "enabling services after unmount"
+		rm -f /tmp/diversion-unmount
+		read_conf_file
+		DIVERSION_STATUS=enabled
+		UNMOUNT_STATUS=
+		write_conf_file
+		[ "$psState" = "on" ] && [ -z "$(pidof pixelserv-tls)" ] && /opt/etc/init.d/rc.unslung start >/dev/null
+		[ ! -f "/tmp/diversion-dnsmasq" ] && restart_DNSMASQ
+		lastAction=" $NAME services enabled after unmount"
+	elif [ "$DIVERSION_STATUS" = "enabled" ] &&  [ "$1" = "restart" ]; then
+		read_conf_file
+		[ "$psState" = "on" ] && on_off_pixelserv on restart
+		restart_DNSMASQ
+		lastAction=" $NAME services restarted"
+	elif [ "$DIVERSION_STATUS" = "disabled" ] && [ "$1" = "enable" ]; then
+		rm -f /tmp/diversion-unmount
+		read_conf_file
+		DIVERSION_STATUS=enabled
+		UNMOUNT_STATUS=
+		if [ "$prevPsState" = "on" ] && [ "$adblocking" = "on" ]; then
+			psState=on
+		fi
+		write_conf_file
+		on_off_pixelserv on
+		restart_DNSMASQ
+		lastAction=" $NAME services enabled"
+	else
+		lastAction=" No change: $NAME is $DIVERSION_STATUS"
+	fi
+	[ "$bm" = ssh ] && echo "${OK}$lastAction"
+	[ "$bm" = ios ] && echo "✔$lastAction"
+}
+
+on_off_pixelserv(){
+	if [ "$EN" -ge "2" ] && [ "$1" = "off" ]; then
+		if [ "$bm" = ios ]; then
+			/opt/etc/init.d/S80pixelserv-tls stop $0 >/dev/null
+		else
+			echo "${GRAY}"
+			/opt/etc/init.d/S80pixelserv-tls stop $0
+			echo "${NC}"
+		fi
+		ifconfig br0:pixelserv-tls "$psIP" down
+		if [ "$psState" = "on" ]; then
+			prevPsState=on
+			psState=off
+		fi
+	elif [ "$EN" -ge "2" ] && [ "$1" = "on" ]; then
+		[ -z "$2" ] && psaction=start || psaction=$2
+		get_file S80pixelserv-tls check "${DIVERSION_DIR}/file" /file/ /opt/etc/init.d/ >/dev/null
+		set_file_permissions
+
+		if [ "$bm" = ios ]; then
+			/opt/etc/init.d/S80pixelserv-tls $psaction $0 >/dev/null
+		else
+			echo "${GRAY}"
+			/opt/etc/init.d/S80pixelserv-tls $psaction $0
+			echo "${NC}"
+			if [ "$?" = "0" ]; then
+				return 0
+			else
+				return 1
+			fi
+		fi
+	fi
+}
+
+set_file_permissions(){
+	[ -f "/opt/bin/$SELF" ] && [ ! -x "/opt/bin/$SELF" ] && chmod 0755 "/opt/bin/$SELF"
+	if [ -d "${DIVERSION_DIR}" ]; then
+		[ -f "${DIVERSION_DIR}/.conf/email.conf" ] && chmod 0640 "${DIVERSION_DIR}/.conf/email.conf"
+		[ -f "${DIVERSION_DIR}/.conf/emailpw.enc" ] && chmod 0640 "${DIVERSION_DIR}/.conf/emailpw.enc"
+
+		for file in "${DIVERSION_DIR}/file/"*; do
+			if [ -f "$file" ]; then
+				[ ! -w "$file" ] && chmod 0666 "$file"
+			fi
+		done
+	fi
+	if [ -d "/opt/etc/init.d" ]; then
+		[ -f "/opt/etc/init.d/S80pixelserv-tls" ] && [ ! -x "/opt/etc/init.d/S80pixelserv-tls" ] && chmod 0755 /opt/etc/init.d/S80pixelserv-tls
+		[ -f "/opt/etc/init.d/rc.func.div" ] && chmod 0644 /opt/etc/init.d/rc.func.div
+		[ -d "/opt/var/cache/pixelserv" ] && chown nobody -R /opt/var/cache/pixelserv
+	fi
+
+	divScripts="/jffs/scripts/dnsmasq.postconf /jffs/scripts/post-mount	/jffs/addons/diversion/mount-entware.div /jffs/scripts/services-stop /jffs/scripts/update-notification /jffs/scripts/unmount"
+	for script in $divScripts; do
+		if [ -f "$script" ]; then
+			dos_to_unix "$script"
+			[ ! -x "$script" ] && chmod 0755 "$script"
+		fi
+	done
+}
+
+state_function(){
+	read_conf_file
+	if [ "$bfFs" = "on" ]; then
+		[ "$bfTypeinUse" = "primary" ] && bfinUse=$bfType || bfinUse=$bfTypeFs
+	else
+		bfinUse=$bfType
+	fi
+	[ -z "$(nvram get odmpid)" ] && routerModel=$(nvram get productid) || routerModel=$(nvram get odmpid)
+	if [ "$EN" -ge "2" ]; then
+		check_ps_version
+		printf "$routerModel $(nvram get buildno) @ $(nvram get lan_ipaddr)\\n$NAME Std. $VERSION: $DIVERSION_STATUS\\n\\nAd-blocking: $adblocking, Logging: $logging\\nBlocking list: $bfinUse, last\\nupdated on: $bfUpdateLastRun\\npixelserv-tls $psVersion: $psState"
+	elif [ "$EN" -eq "1" ]; then
+		printf "$routerModel $(nvram get buildno) @ $(nvram get lan_ipaddr)\\n$NAME Lite $VERSION: $DIVERSION_STATUS\\n\\nAd-blocking: $adblocking, Logging: $logging\\nBlocking list: $bfinUse, last\\nupdated on: $bfUpdateLastRun"
+	fi
+}
+
+update_blockinglist(){
+	if [ "$(ps | grep -v grep | grep update-bl.div)" ]; then
+		lastError=" Blocking list update already runs"
+		[ "$bm" = ssh ] && printf "${NOK}$lastError in the background\\n\\n"
+		[ "$bm" = ios ] && echo "✖$lastError"
+	else
+		read_conf_file
+		edited_whitelist=
+		edited_blacklist=
+		edited_wc_blacklist=
+		write_conf_file
+		sh "${DIVERSION_DIR}/file/update-bl.div" >/dev/null 2>&1 &
+		lastAction=" The blocking list is being updated now."
+		[ "$bm" = ssh ] && printf "${OK}$lastAction\\n\\n"
+		[ "$bm" = ios ] && echo "✔$lastAction"
+	fi
+}
+
+state_check "$@"
+#eof

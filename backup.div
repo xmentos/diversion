@@ -1,0 +1,265 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+DIVERSION_DIR=/opt/share/diversion
+
+if [ -f "${DIVERSION_DIR}/.conf/diversion.conf" ]; then
+	. "${DIVERSION_DIR}/.conf/diversion.conf"
+	[ -z "$1" ] || [ "$1" != local ] && . "${DIVERSION_DIR}/.conf/email.conf"
+else
+	logger -t Diversion "was unable to run the backup, diversion.conf not found"
+	exit 1
+fi
+
+# remove old temp files
+rm -rf /tmp/divmail* /tmp/diversion-backup
+
+# positional parameters for manual backup:
+# $1 = Backup type (Key-files, Key+logs Custom), $2 = file type (files, compressed) $3 = compress method (zip, tar.gz)
+if [ "$1" ]; then
+	if [ "$1" = local ]; then
+		buType=Key-files;buAs=compressed;buCompression=tar.gz
+	else
+		buType=$1;buAs=$2;buCompression=$3
+	fi
+fi
+
+dos_to_unix(){ dos2unix < $1 | cmp -s - $1;[ "$?" = "1" ] && dos2unix $1;}
+[ -z "$(nvram get odmpid)" ] && routerModel=$(nvram get productid) || routerModel=$(nvram get odmpid)
+[ -z "$FRIENDLY_ROUTER_NAME" ] && FRIENDLY_ROUTER_NAME=$routerModel
+dateFiles=$(date +"%F_%H.%M")
+
+# files/folders for predifined backups DO NOT CHANGE THIS, use Custom file
+if [ "$buType" = "Key-files" ]; then
+
+	backupFiles="${DIVERSION_DIR}/list/blacklist
+${DIVERSION_DIR}/list/wc_blacklist
+${DIVERSION_DIR}/list/whitelist
+${DIVERSION_DIR}/list/*hostslist*
+${DIVERSION_DIR}/.conf/email.conf
+${DIVERSION_DIR}/.conf/emailpw.enc
+${DIVERSION_DIR}/.conf/diversion.conf
+/opt/var/cache/pixelserv/ca.crt
+/opt/var/cache/pixelserv/ca.key
+${DIVERSION_DIR}/custom"
+
+elif [ "$buType" = "Key+logs" ]; then
+
+	backupFiles="${DIVERSION_DIR}/list/blacklist
+${DIVERSION_DIR}/list/wc_blacklist
+${DIVERSION_DIR}/list/whitelist
+${DIVERSION_DIR}/list/*hostslist*
+${DIVERSION_DIR}/.conf/email.conf
+${DIVERSION_DIR}/.conf/emailpw.enc
+${DIVERSION_DIR}/.conf/diversion.conf
+/opt/var/cache/pixelserv/ca.crt
+/opt/var/cache/pixelserv/ca.key
+${DIVERSION_DIR}/.conf/pixelserv.switches
+${DIVERSION_DIR}/custom
+/opt/var/log/dnsmasq.log*"
+
+elif [ "$buType" = "Custom" ] && [ -f "${DIVERSION_DIR}/custom/custom_backup_settings.txt" ]; then
+	dos_to_unix ${DIVERSION_DIR}/custom/custom_backup_settings.txt
+	echo $(grep "^[^#]" ${DIVERSION_DIR}/custom/custom_backup_settings.txt) >/tmp/divmail-file
+	backupFiles=$(echo $(eval echo \"$(cat /tmp/divmail-file)\"))
+fi
+
+if [ -f "${DIVERSION_DIR}/custom/backup_exclude.txt" ] && [ -z "$1" ] || [ "$1" != local ]; then
+	dos_to_unix "${DIVERSION_DIR}/custom/backup_exclude.txt"
+	echo $(grep "^[^#]" ${DIVERSION_DIR}/custom/backup_exclude.txt) >/tmp/divmail-exclude-file
+	excludeFiles=$(echo $(eval echo \"$(cat /tmp/divmail-exclude-file)\"))
+	echo $excludeFiles | sed 's/\s\+/\n/g' | sed 's/.*\///' >/tmp/divmail-exclude-file
+fi
+
+if [ "$1" = local ]; then
+	echo >/tmp/divmail-exclude-file
+fi
+
+[ -z "$1" ] || [ "$1" != local ] && printf "Sending backup now, using these settings:\\nBackup type \"$buType\" as \"$buAs\" and compress with \"$buCompression\"\\n"
+
+i=1
+check_files(){
+mkdir -p /tmp/diversion-backup
+for file in $backupFiles;do
+
+	# check if file or folder exists
+	if [ -f "$file" ] || [ -d "$file" ]; then
+
+		# exclude files (separate from backup_exclude.txt)
+		exclude=0
+		case "${file##*.}" in
+			tmp|swp|bak|pgl) # exclude these file types
+			printf "Excluding file:\\n$file\\n"
+			exclude=1;;
+		esac
+		case "${file##*/}" in
+			blockinglist) # exclude these file types
+			printf "Excluding file:\\n$file\\n"
+			exclude=1;;
+		esac
+
+		# only loop if file not excluded
+		if [ "$exclude" = "0" ]; then
+
+			# send uncompressed files, if not .txt append it to filename
+			if [ -f "$file" ] && [ "$1" = "files" ]; then
+				if [ "${file##*.}" = "txt" ]; then
+					if [ -z "$attFiles" ]; then
+						attFiles="$file"
+					else
+attFiles="$attFiles
+$file"
+					fi
+				else
+					cp $file /tmp/diversion-backup/${file##*/}.txt
+attFiles="$attFiles
+/tmp/diversion-backup/${file##*/}.txt"
+				fi
+				i=$((i+1))
+
+			# send compressed files
+			elif [ -f "$file" ] && [ "$1" = "compressed" ]; then
+				if [ -z "$attFiles" ]; then
+					attFiles="$file"
+				else
+attFiles="$attFiles
+$file"
+				fi
+				i=$((i+1))
+			fi
+
+			# always send folders compressed, even when files is selected
+			if [ -d "$file" ] && [ "$1" = "files" ]; then
+				printf "\\nCompressing folder:\\n"
+				if [ -z "$attFiles" ]; then
+					attFiles="/tmp/diversion-backup/${file##*/}.$2"
+				else
+attFiles="$attFiles
+/tmp/diversion-backup/${file##*/}.$2"
+				fi
+				case "$2" in
+					zip) zip -r /tmp/diversion-backup/${file##*/}.zip $file -x $excludeFiles;;
+					tar.gz) tar -vcz -f /tmp/diversion-backup/${file##*/}.tar.gz $file -X /tmp/divmail-exclude-file;;
+				esac
+				i=$((i+1))
+
+			# add path when to be compressed when sendig as compressed
+			elif [ -d "$file" ] && [ "$1" = "compressed" ]; then
+				if [ -z "$attFiles" ]; then
+					attFiles="$file"
+				else
+attFiles="$attFiles
+$file"
+				fi
+				i=$((i+1))
+			fi
+		fi
+	fi
+done
+}
+check_files $buAs $buCompression $1
+
+[ -z "$1" ] || [ "$1" != local ] && printf "\\nSending files/folders:\\n$attFiles\\n"
+
+if [ "$buAs" = "compressed" ]; then
+	if [ -z "$1" ] || [ "$1" != local ]; then
+		fileName="/tmp/diversion-backup/${NAME}_Backup_${FRIENDLY_ROUTER_NAME}_${buType}_${dateFiles}.$buCompression"
+	else
+		thisFileName="${NAME}_${EDITION}_local_backup_$(date +"%b_%d_%Y_%H.%M.%S").tar.gz"
+		fileName="/tmp/diversion-backup/$thisFileName"
+	fi
+	printf "\\nCompressing files as $buCompression:\\n"
+	case "$buCompression" in
+		zip) 	zip -r $fileName $attFiles -x $excludeFiles;;
+		tar.gz)	tar -vcz -f $fileName $attFiles -X /tmp/divmail-exclude-file;;
+	esac
+	attFiles=$fileName
+fi
+
+if [ -z "$1" ] || [ "$1" != local ]; then
+	FROM_NAME="$NAME Router Backup"
+
+	> /tmp/divmail-dummy
+makemime -a"From: $FROM_NAME <$FROM_ADDRESS>" -a"To: $TO_NAME <$TO_ADDRESS>" -a"Subject: $FRIENDLY_ROUTER_NAME Router Backup ($buType) $dateFiles" \
+-a"Date: `date -R`" -c"text/plain" /tmp/divmail-dummy $attFiles -o /tmp/divmail-body
+sed -i '1,/text/s/text/REPLACE/' /tmp/divmail-body
+sed -i '/REPLACE/c\Content-Transfer-Encoding: 7bit' /tmp/divmail-body
+sed -i '/divmail-dummy/c\Content-Type: text/plain; charset=UTF-8' /tmp/divmail-body
+sed -i '1,/base64/s/base64/REPLACE2/' /tmp/divmail-body
+sed -i 's/inline;/attachment;/g' /tmp/divmail-body
+sed -i '/REPLACE2/c\' /tmp/divmail-body
+sed -i '/charset=UTF-8/a \
+\
+Greetings from '"$NAME"' \
+\
+Find attached your router backup files '"($buType)"' from '"$dateFiles"'. \
+\
+Location to place files in case you want to restore them: \
+\
+'"$NAME"' list files: \
+- blacklist(.txt), wc_blacklist(.txt), whitelist(.txt), hostslist(.txt), hostslist_fs(.txt): \
+Into the '"${DIVERSION_DIR}/list"' folder (without the .txt extension). \
+\
+- email.conf(.txt), emailpw.enc(.txt) and diversion.conf(.txt): \
+Into the '"${DIVERSION_DIR}/.conf"' folder as email.conf, emailpw.enc and diversion.conf (without the .txt extension). \
+\
+Custom files (such as custom_hosts_list.txt): \
+Into the '"${DIVERSION_DIR}/custom"' folder. \
+\
+pixelserv-tls files: \
+- ca.crt(.txt) and ca.key(.txt): \
+Into the /opt/var/cache/pixelserv/ folder as ca.crt or ca.key (without the .txt extension). \
+\
+- pixelserv.switches file: \
+Into the '"${DIVERSION_DIR}/.conf"' folder. \
+\
+Very truly yours, \
+Your '"$FRIENDLY_ROUTER_NAME"' router (Model type '"$routerModel"')
+\' /tmp/divmail-body
+
+	printf "\\nMailing files, transmission output follows\\n\\n"
+
+	/usr/sbin/curl --url $PROTOCOL://$SMTP:$PORT \
+		--mail-from "$FROM_ADDRESS" --mail-rcpt "$TO_ADDRESS" \
+		--upload-file /tmp/divmail-body \
+		--ssl-reqd \
+		--user "$USERNAME:$(/usr/sbin/openssl aes-256-cbc -d -in /opt/share/diversion/.conf/emailpw.enc -pass pass:ditbabot,isoi)" $SSL_FLAG
+
+	if [ "$?" = "0" ]; then
+		logger -t Diversion "sent backup files ($buType) to $TO_ADDRESS"
+		printf "\\n$NAME sent backup files ($buType) to $TO_ADDRESS\\n"
+	else
+		logger -t Diversion "failed to sent backup files ($buType)"
+		printf "\\n$NAME failed to sent backup files ($buType)\\n"
+	fi
+else
+	prevBackup=$(find /jffs/addons/diversion/${NAME}_*_local_backup*.tar.gz 2> /dev/null)
+	if [ "$prevBackup" ]; then
+		mv -f "$prevBackup" "${prevBackup}.old"
+	fi
+
+	mv $attFiles /jffs/addons/diversion/
+
+	if [ -s "/jffs/addons/diversion/$thisFileName" ]; then
+		logger -t Diversion "saved local backup to /jffs/addons/diversion"
+	elif [ "$prevBackup" ]; then
+		mv -f "${prevBackup}.old" "$prevBackup"
+		logger -t Diversion "failed to create local backup, keeping previous file"
+	else
+		logger -t Diversion "failed to create local backup"
+	fi
+	rm -f "${prevBackup}.old"
+fi
+rm -rf /tmp/divmail* /tmp/diversion-backup
+
+#eof

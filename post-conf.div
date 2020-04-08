@@ -1,0 +1,225 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+DIVERSION_DIR=/opt/share/diversion
+CONFIG=$1
+
+if [ -s "${DIVERSION_DIR}/.conf/diversion.conf" ]; then
+
+	if [ -f /tmp/divwrite.lock ]; then
+		logger -t Diversion "diversion.conf is locked by another process, waiting 3secs"
+		sleep 3
+		rm -f /tmp/divwrite.lock
+	fi
+	. "${DIVERSION_DIR}/.conf/diversion.conf"
+
+	if [ "$UNMOUNT_STATUS" = "unmounted" ] && [ ! -f "/tmp/diversion-unmount" ]; then
+		touch /tmp/diversion-dnsmasq
+		diversion mount
+		DIVERSION_STATUS=enabled
+	fi
+
+	if [ "$DIVERSION_STATUS" = "enabled" ]; then
+		if [ "$adblocking" = "on" ]; then
+
+			BFinUse="${DIVERSION_DIR}/list/blockinglist"
+			if [ "$bfFs" = "on" ]; then
+				if [ "$bfTypeinUse" = "secondary" ]; then
+					BFinUse="${DIVERSION_DIR}/list/blockinglist_fs"
+					otherBFinUse="${DIVERSION_DIR}/list/blockinglist"
+				else
+					otherBFinUse="${DIVERSION_DIR}/list/blockinglist_fs"
+				fi
+			fi
+
+			cti=;iprem=;ipadd=
+			convert_to_ip(){ sed -i "s/^[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/$1/g" "$2";}
+
+			if [ "$blockingIP" ] && ! head -1 "$BFinUse" | grep -wq "^$blockingIP"; then
+				convert_to_ip "$blockingIP" "$BFinUse"
+				convert_to_ip "$blockingIP" "${DIVERSION_DIR}/list/blacklist"
+				cti=1
+			fi
+			if [ "$blockingIP" ] && [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && ! head -1 "$otherBFinUse" | grep -wq "^$blockingIP"; then
+				convert_to_ip "$blockingIP" "$otherBFinUse"
+				cti=1
+			fi
+			[ "$cti" ] && logger -t Diversion "auto-converted blocking IP to $blockingIP in blocking list(s) and blacklist"
+
+			if [ "$(nvram get ipv6_service)" = "disabled" ] && grep -wq "^::" "$BFinUse" "${DIVERSION_DIR}/list/blacklist";then
+				sed -i '/^::/d' "$BFinUse"
+				sed -i '/::/d' "${DIVERSION_DIR}/list/blacklist"
+				iprem=1
+			elif [ "$(nvram get ipv6_service)" != "disabled" ]; then
+				if ! grep -wq "^::" "$BFinUse"; then
+					sed -e "s/$blockingIP/::/g" "$BFinUse" >"${BFinUse}.tmp"
+					cat "${BFinUse}.tmp" >>"$BFinUse"
+					rm "${BFinUse}.tmp"
+					ipadd=1
+				fi
+				if ! grep -wq "^::" "${DIVERSION_DIR}/list/blacklist"; then
+					sed -e "s/$blockingIP/::/g" "${DIVERSION_DIR}/list/blacklist" >/tmp/blacklist
+					cat /tmp/blacklist >>"${DIVERSION_DIR}/list/blacklist"
+					rm /tmp/blacklist
+					ipadd=1
+				fi
+			fi
+			if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+				if [ "$(nvram get ipv6_service)" = "disabled" ] && grep -wq "^::" "$otherBFinUse";then
+					sed -i '/^::/d' "$otherBFinUse"
+					iprem=1
+				elif [ "$(nvram get ipv6_service)" != "disabled" ] && ! grep -wq "^::" "$otherBFinUse"; then
+					sed -e "s/$blockingIP/::/g" "$otherBFinUse" >"${otherBFinUse}.tmp"
+					cat "${otherBFinUse}.tmp" >>"$otherBFinUse"
+					rm "${otherBFinUse}.tmp"
+					ipadd=1
+				fi
+			fi
+			[ "$iprem" ] && logger -t Diversion "auto-removed IPv6 entries from blocking list(s) and blacklist"
+			[ "$ipadd" ] && logger -t Diversion "auto-added IPv6 entries to blocking list(s) and blacklist, this might have taken some time"
+		fi
+
+		if [ "$adblocking" = "off" ]; then
+			cru d Diversion_UpdateBL
+			cru d Diversion_UpdateBLTwo
+		fi
+
+		if [ "$logging" = "off" ]; then
+			cru d Diversion_RotateLogs
+			cru d Diversion_CountAds
+			cru d Diversion_WeeklyStats
+		fi
+
+		[ "$weeklyStats" = "off" ] && cru d Diversion_WeeklyStats
+		[ "$backup" = "off" ] && cru d Diversion_AutoBackup
+		[ -z "$localBackup" ] && cru d Diversion_LocalBackup
+		[ "$divUpdate" = "off" ] && cru d Diversion_UpdateCheck
+		if [ "$adblocking" = "on" ]; then
+			cru a Diversion_UpdateBL "00 ${bfUpdateHour} * * $(echo $bfUpdateDOW | sed 's/,.*//') sh ${DIVERSION_DIR}/file/update-bl.div reset"
+			[ "$(echo "$bfUpdateDOW" | wc -c)" -gt 5 ] && cru a Diversion_UpdateBLTwo "00 ${bfUpdateHour} * * $(echo $bfUpdateDOW | sed 's/.*,//') sh ${DIVERSION_DIR}/file/update-bl.div"
+		fi
+
+		if [ "$logging" = "on" ]; then
+			cru a Diversion_RotateLogs "20 5 * * * sh ${DIVERSION_DIR}/file/rotate-logs.div"
+			cru a Diversion_CountAds "20 17 * * * diversion count_ads count"
+			[ "$weeklyStats" = "on" ] && cru a Diversion_WeeklyStats "30 $((bfUpdateHour-1)) * * $(echo $bfUpdateDOW | sed 's/,.*//') sh ${DIVERSION_DIR}/file/stats.div"
+		fi
+
+		if [ "$backup" = "on" ]; then
+			if [ "$buFrequency" = "weekly" ]; then
+				cru a Diversion_AutoBackup "50 $((bfUpdateHour-1)) * * $(echo $bfUpdateDOW | sed 's/,.*//') sh ${DIVERSION_DIR}/file/backup.div"
+			elif [ "$buFrequency" = "monthly" ]; then
+				cru a Diversion_AutoBackup "50 $((bfUpdateHour-1)) * * $(echo $bfUpdateDOW | sed 's/,.*//') [ $(echo '"$(date +%d)" -le "07"') ] && sh ${DIVERSION_DIR}/file/backup.div"
+			fi
+		fi
+
+		if [ "$localBackup" = "on" ]; then
+			if [ "$lBuFrequency" = "weekly" ]; then
+				cru a Diversion_LocalBackup "10 $((bfUpdateHour+1)) * * $(echo $bfUpdateDOW | sed 's/,.*//') sh ${DIVERSION_DIR}/file/backup.div local"
+			elif [ "$lBuFrequency" = "monthly" ]; then
+				cru a Diversion_LocalBackup "10 $((bfUpdateHour+1)) * * $(echo $bfUpdateDOW | sed 's/,.*//') [ $(echo '"$(date +%d)" -le "07"') ] && sh ${DIVERSION_DIR}/file/backup.div local"
+			fi
+		fi
+
+		if [ "$divUpdate" = "on" ]; then
+			cru a Diversion_UpdateCheck "10 $((${bfUpdateHour}-1)) * * $(echo $bfUpdateDOW | sed 's/,.*//') sh ${DIVERSION_DIR}/file/update.div"
+		fi
+
+		. /usr/sbin/helper.sh
+
+		[ "$adblocking" = "on" ] || [ "$logging" = "on" ] || [ "$dsSetting" = "on" ] && sed -i '$a\\n# start of Diversion directives #' $CONFIG
+
+		if [ "$adblocking" = "on" ]; then
+			if [ -s "${DIVERSION_DIR}/list/wc_blacklist" ]; then
+				for i in $(grep "^[^#]" "${DIVERSION_DIR}/list/wc_blacklist" | awk '{print $1}'); do
+					pc_append "address=/$i/$blockingIP" $CONFIG
+					[ "$(nvram get ipv6_service)" != "disabled" ] && pc_append "address=/$i/::" $CONFIG
+				done
+			fi
+
+			if [ "$psState" = "on" ]; then
+				if [ "$(nvram get ipv6_service)" = "disabled" ]; then
+					pc_append "ptr-record=$(echo "${blockingIP}" | awk -F . '{print $4"."$3"."$2"."$1}').in-addr.arpa,$blockingIP" $CONFIG
+				else
+					pc_append "ptr-record=$(echo "${blockingIP}" | awk -F . '{print $4"."$3"."$2"."$1}').in-addr.arpa,$blockingIP" $CONFIG
+					pc_append "address=/::/::" $CONFIG
+					pc_append "ptr-record=0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa,::" $CONFIG
+				fi
+			elif [ -z "$psState" ] || [ "$psState" = "off" ]; then
+				if [ "$LANblockingIP" ] && [ "$LANblockingIP" = "on" ]; then
+					pc_append "ptr-record=$(echo "${blockingIP}" | awk -F . '{print $4"."$3"."$2"."$1}').in-addr.arpa,$blockingIP" $CONFIG
+				else
+					pc_append "address=/0.0.0.0/0.0.0.0" $CONFIG
+					pc_append "ptr-record=0.0.0.0.in-addr.arpa,0.0.0.0" $CONFIG
+				fi
+				if [ "$(nvram get ipv6_service)" != "disabled" ]; then
+					pc_append "address=/::/::" $CONFIG
+					pc_append "ptr-record=0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa,::" $CONFIG
+				fi
+			fi
+			pc_append "addn-hosts=${DIVERSION_DIR}/list/blacklist" $CONFIG
+			pc_append "addn-hosts=$BFinUse" $CONFIG
+		fi
+
+		if [ "$dsSetting" = "on" ]; then
+			[ "$cacheSize" ] && pc_replace "cache-size=1500" "cache-size=$cacheSize" $CONFIG
+			[ "$bogusPriv" ] && ! grep -q 'bogus-priv' /etc/dnsmasq.conf && pc_append "bogus-priv" $CONFIG
+			[ "$domainNeeded" ] && ! grep -q 'domain-needed' /etc/dnsmasq.conf && pc_append "domain-needed" $CONFIG
+		fi
+
+		if [ "$logging" = "on" ]; then
+			[ "$dsSetting" = "on" ] && [ "$logAsync" ] && pc_append "log-async=$logAsync" $CONFIG || pc_append "log-async" $CONFIG
+			if [ "$dsSetting" = "on" ] && [ "$loqQueriesExtra" ]; then
+				pc_append "log-queries=extra" $CONFIG
+			else
+				[ ! -f /tmp/diversion-loqQueriesExtra ] && pc_append "log-queries" $CONFIG
+			fi
+			if [ -f /tmp/diversion-loqQueriesExtra ]; then
+				pc_append "log-queries=extra" $CONFIG
+				mv /tmp/diversion-loqQueriesExtra /tmp/diversion-restartDnsmasq
+			fi
+			pc_append "log-facility=/opt/var/log/dnsmasq.log" $CONFIG
+
+			[ ! -f /opt/var/log/dnsmasq.log1 ] && touch /opt/var/log/dnsmasq.log1 /opt/var/log/dnsmasq.log2
+			if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+				[ ! -f /opt/var/log/dnsmasq.log4 ] && touch /opt/var/log/dnsmasq.log4 /opt/var/log/dnsmasq.log5
+			fi
+			chown nobody /opt/var/log/dnsmasq.log*
+			chmod 0640 /opt/var/log/dnsmasq.log*
+		fi
+
+		[ "$adblocking" = "on" ] || [ "$logging" = "on" ] || [ "$dsSetting" = "on" ] && sed -i '$a\# end of Diversion directives #' $CONFIG
+
+		if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+			. "${DIVERSION_DIR}/file/alternate-bf.div"
+		fi
+
+		logger -t Diversion "restarted Dnsmasq to apply settings"
+		rm /tmp/diversion-dnsmasq
+	else
+		cru d Diversion_UpdateBL
+		cru d Diversion_UpdateBLTwo
+		cru d Diversion_RotateLogs
+		cru d Diversion_CountAds
+		cru d Diversion_WeeklyStats
+		cru d Diversion_AutoBackup
+		cru d Diversion_UpdateCheck
+		cru d Diversion_LocalBackup
+		[ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && ifconfig br0:alternate_bf $aBFIP down
+		[ -z "$UNMOUNT_STATUS" ] && logger -t Diversion "is disabled, no services started"
+	fi
+
+else
+	logger -t Diversion "diversion.conf not found, not starting services"
+fi
+#eof

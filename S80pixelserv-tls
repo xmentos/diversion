@@ -1,0 +1,45 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+if [ -f /opt/share/diversion/.conf/diversion.conf ]; then
+	. /opt/share/diversion/.conf/diversion.conf
+
+	if [ "$UNMOUNT_STATUS" = "unmounted" ] && [ ! -f "/tmp/diversion-unmount" ]; then
+		DIVERSION_STATUS=enabled;psState=on
+	fi
+
+	if [ "$DIVERSION_STATUS" = "enabled" ] && [ "$psState" = "on" ]; then
+		switchesFile=/opt/share/diversion/.conf/pixelserv.switches
+		[ -f "$switchesFile" ] && switches=$(cat $switchesFile | tr '\n' ' ') || switches=
+
+		if [ -z "$1" ] || [ "$1" != "stop" ]; then
+			ifconfig br0:pixelserv-tls $psIP up
+			logger -t Diversion "created br0:pixelserv-tls for $psIP"
+		fi
+
+		export TZ=$(cat /etc/TZ)
+		ENABLED=yes
+		PROCS=pixelserv-tls
+		ARGS="$psIP $switches"
+		PREARGS=""
+		PRECMD=""
+		DESC="$PROCS (Diversion)"
+		PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+		. /opt/etc/init.d/rc.func.div
+	else
+		logger -t Diversion "pixelserv-tls or Diversion disabled, not starting pixelserv-tls"
+	fi
+else
+	logger -t Diversion "diversion.conf file not found, not starting pixelserv-tls"
+fi
+#eof

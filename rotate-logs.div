@@ -1,0 +1,72 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+DIVERSION_DIR="/opt/share/diversion"
+
+if [ -f "${DIVERSION_DIR}/.conf/diversion.conf" ]; then
+	. "${DIVERSION_DIR}/.conf/diversion.conf"
+
+	if [ -f "/opt/var/log/dnsmasq.log" ]; then
+
+		diversion count_ads
+
+		if [ "$weeklyStats" = "on" ]; then
+			[ -d /tmp/divstats ] && rm -rf /tmp/divstats
+			mkdir /tmp/divstats
+			[ ! -f "${DIVERSION_DIR}/backup/diversion_stats-iphostleases" ] && > "${DIVERSION_DIR}/backup/diversion_stats-iphostleases"
+			[ -s /tmp/etc/hosts.dnsmasq ] && awk '{print $1}' /tmp/etc/hosts.dnsmasq >>/tmp/divstats/div-allips.tmp
+			[ -s /var/lib/misc/dnsmasq.leases ] && awk '{print $3}' /var/lib/misc/dnsmasq.leases >>/tmp/divstats/div-allips.tmp
+			cat /tmp/divstats/div-allips.tmp | sort -t . -k 4,4n -u >/tmp/divstats/div-allips
+			for i in $(awk '{print $1}' /tmp/divstats/div-allips);do
+				if [ -s /tmp/etc/hosts.dnsmasq ] && grep -wq $i /tmp/etc/hosts.dnsmasq; then
+					echo $(awk -v var="$i" -F' ' '$1 == var{print $1, $2}' /tmp/etc/hosts.dnsmasq) >>/tmp/divstats/div-iphostleases
+				elif [ -s /var/lib/misc/dnsmasq.leases ]; then
+					echo $(awk -v var="$i" -F' ' '$3 == var{print $3, $4}' /var/lib/misc/dnsmasq.leases) >>/tmp/divstats/div-iphostleases
+				fi
+			done
+			sed -i '/Name-N/d; $a\' /tmp/divstats/div-iphostleases
+			cat /tmp/divstats/div-iphostleases "${DIVERSION_DIR}/backup/diversion_stats-iphostleases" >/tmp/divstats/div-iphostleases.tmp
+			sed -i '/^\s*$/d' /tmp/divstats/div-iphostleases.tmp
+			cat /tmp/divstats/div-iphostleases.tmp | sort -t . -k 4,4n -u > "${DIVERSION_DIR}/backup/diversion_stats-iphostleases"
+			rm -rf /tmp/divstats
+		fi
+
+		if [ "$(find /opt/var/log/dnsmasq.log* -mtime +8)" ]; then
+			rm -f $(find /opt/var/log/dnsmasq.log* -mtime +8)
+			logger -t Diversion "removed old dnsmasq.log file(s)"
+		fi
+
+		# log, log1, log2 ## log3, log4, log5
+		[ ! -f /opt/var/log/dnsmasq.log1 ] && touch /opt/var/log/dnsmasq.log1 /opt/var/log/dnsmasq.log2
+		cat /opt/var/log/dnsmasq.log1 >>/opt/var/log/dnsmasq.log2
+		mv /opt/var/log/dnsmasq.log /opt/var/log/dnsmasq.log1
+		>/opt/var/log/dnsmasq.log
+
+		if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && [ -f /opt/var/log/dnsmasq.log3 ]; then
+			[ ! -f /opt/var/log/dnsmasq.log4 ] && touch /opt/var/log/dnsmasq.log4 /opt/var/log/dnsmasq.log5
+			cat /opt/var/log/dnsmasq.log4 >>/opt/var/log/dnsmasq.log5
+			mv /opt/var/log/dnsmasq.log3 /opt/var/log/dnsmasq.log4
+			>/opt/var/log/dnsmasq.log3
+		fi
+		chown nobody /opt/var/log/dnsmasq.log*
+		chmod 0640 /opt/var/log/dnsmasq.log*
+		kill -USR2 $(pidof dnsmasq)
+
+		logger -t Diversion "rotated dnsmasq log files"
+	else
+		logger -t Diversion "dnsmasq.log file not found, not rotating log files"
+	fi
+else
+	logger -t Diversion "diversion.conf file not found, not rotating log files"
+fi
+#eof

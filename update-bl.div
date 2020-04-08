@@ -1,0 +1,666 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Contributor:
+# Dabombber with a superior write_blockinglist function
+
+# Script Version 4.1.11
+
+DIVERSION_DIR=/opt/share/diversion
+
+if [ -f "${DIVERSION_DIR}/.conf/diversion.conf" ]; then
+	. "${DIVERSION_DIR}/.conf/diversion.conf"
+	. "${DIVERSION_DIR}/file/write-config.div"
+
+	temp_hosts="${DIVERSION_DIR}/list/temp_hosts"
+	whitelist="${DIVERSION_DIR}/list/whitelist"
+	[ "$1" = "reset" ] && reset=1
+
+	if [ "$bfFs" = "on" ]; then
+		[ -z "$1" ] && set "both"
+		[ "$1" = "reset" ] && set "both"
+
+		case "$1" in
+			both)		HL=hostslist
+						otherHL=hostslist_fs
+						blockinglist="${DIVERSION_DIR}/list/blockinglist"
+						lastBF=no
+						currType=$bfType
+						currBFType=primary;;
+			primary)	HL=hostslist
+						otherHL=hostslist_fs
+						blockinglist="${DIVERSION_DIR}/list/blockinglist"
+						lastBF=yes
+						currType=$bfType
+						currBFType=primary;;
+			secondary)	HL=hostslist_fs
+						otherHL=hostslist
+						blockinglist="${DIVERSION_DIR}/list/blockinglist_fs"
+						lastBF=yes
+						currType=$bfTypeFs
+						currBFType=secondary;;
+		esac
+
+		[ "$bfTypeinUse" = "primary" ] && blockinglistPrev="${DIVERSION_DIR}/list/blockinglist.prev" || blockinglistPrev="${DIVERSION_DIR}/list/blockinglist_fs.prev"
+		getHostsFs=$(/opt/bin/grep "^[^#]" ${DIVERSION_DIR}/list/$otherHL)
+
+	else
+		blockinglist="${DIVERSION_DIR}/list/blockinglist"
+		HL=hostslist
+		blockinglistPrev="${DIVERSION_DIR}/list/blockinglist.prev"
+		lastBF=yes
+		currType=$bfType
+	fi
+	trim_file(){ sed -i '/^[[:space:]]*$/d' "$1"; [ -n "$(tail -c1 "$1")" ] && echo >> "$1";}
+	curl_dl(){ /usr/sbin/curl --insecure --location --connect-timeout 10 --retry 3 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:53.0) Gecko/20100101 Firefox/53.0" --progress-bar "$@";}
+	[ -z "$domainsPerLine" ] && domainsPerLine=20
+	write_blockinglist(){ awk '{if(NR%'"$domainsPerLine"'==0){a=a""$0;print b a; a=""}else a=a""$0}END{if(a)print b a}' b="$blockingIP" "${blockinglist}.tmp" > "${blockinglist}"; }
+
+	count_hosts(){
+		if [ -f "${DIVERSION_DIR}/list/$HL" ]; then
+			trim_file "${DIVERSION_DIR}/list/$HL"
+			getHosts=$(/opt/bin/grep "^[^#]" ${DIVERSION_DIR}/list/$HL)
+			lc=$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/$HL" | wc -l)
+			if [ "$lc" -eq 0 ]; then
+				echo " hostslist file empty, not updating blocking list"
+				logger -t Diversion "hostslist file empty, not updating blocking list"
+				exit 1
+			fi
+
+			getHosts=$(echo "$getHosts" | tr " " "\n" | sort -u)
+			lcs=$(echo "$getHosts" | wc -l)
+		else
+			echo " hostslist file not found, not updating blocking list"
+			logger -t Diversion "hostslist file not found, not updating blocking list"
+			exit 1
+		fi
+	}
+	count_hosts
+
+	update_blockingfile(){
+		blist="${DIVERSION_DIR}/list/blockinglist"
+		if [ -f "$blist" ] || [ -f "${blist}_fs" ]; then
+			blistTotal=0
+			[ -f "$blist" ] && blistTotal=$((blistTotal+$(du $blist | awk '{print $1}')))
+			[ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ] && [ -f "${blist}_fs" ] && blistTotal=$((blistTotal+$(du ${blist}_fs | awk '{print $1}')))
+
+			if [ "$blistTotal" -gt "1050" ]; then
+				echo " using temporary pgl.yoyo.org file to lower memory usage while updating"
+				sync; echo 3 > /proc/sys/vm/drop_caches
+				hosts='https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext&useip=0.0.0.0'
+				hostsfile="${DIVERSION_DIR}/backup/tmp_blockinglist_$(echo $hosts | sed 's#http[s]*://##;s#/#-#g;s#?#-#g;s#=.*##g')"
+
+				if [ -f "${hostsfile}" ]; then
+					localmd5="$(md5sum "${hostsfile}" | awk '{print $1}')"
+					remotemd5="$(/usr/sbin/curl -fsL --insecure --retry 3 "$hosts" | md5sum | awk '{print $1}')"
+
+					if [ "$localmd5" != "$remotemd5" ]; then
+						echo " remote file newer: getting new file"
+						echo " $hosts"
+						curl_dl "$hosts" >"${hostsfile}"
+					else
+						echo " remote file same: using local file"
+						echo " $hosts"
+					fi
+				else
+					echo " no local file: getting new file"
+					echo " $hosts"
+					curl_dl "$hosts" >"${hostsfile}"
+				fi
+
+				if [ -f "${hostsfile}" ]; then
+					/opt/bin/grep "^[^#]" "${hostsfile}" \
+					| sed -e "s/^[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/X/g" \
+					| /opt/bin/grep -w "^X" | awk '{print " "$2}' | /opt/bin/grep -E '[[:alnum:]]+[.][[:alnum:]_.-]+' \
+					| awk '!/ [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/' \
+					| sort -u >"${blockinglist}.tmp"
+
+					if [ -s "${blockinglist}.tmp" ]; then
+						[ -f "${blockinglist}" ] &&	mv "${blockinglist}" "$blockinglistPrev"
+						echo " writing temporary pgl.yoyo.org blocking list(s)"
+						sed -i '1s/^/ diversion-adblocking-ip.address/' "${blockinglist}.tmp"
+						write_blockinglist
+						if [ "$(nvram get ipv6_service)" != "disabled" ]; then
+							echo " adding IPv6 blocking entries to temporary pgl.yoyo.org blocking list"
+							sed -e "s/$blockingIP/::/g" "${blockinglist}" >"${blockinglist}.tmp"
+							cat "${blockinglist}.tmp" >>"${blockinglist}"
+						fi
+						if [ "$bfFs" = "on" ]; then
+							if [ "${blockinglist#/opt/share/diversion/list/}" = "blockinglist_fs" ]; then
+								[ -f "${blist}" ] && mv "${blist}" "$blist".prev
+								cp -f "${blockinglist}" "${blist}"
+							else
+								[ -f "${blist}_fs" ] && mv "${blist}_fs" "${blist}_fs".prev
+								cp -f "${blockinglist}" "${blist}_fs"
+							fi
+						fi
+						service restart_dnsmasq >/dev/null
+						sleep 2
+					else
+						echo " pgl.yoyo.org is not hosts file, keeping blocking list"
+						logger -t Diversion "pgl.yoyo.org is not hosts file, keeping blocking list"
+						rm -f "${blockinglist}.tmp" "${hostsfile}"
+						cp "${blockinglist}" "$blockinglistPrev"
+					fi
+				else
+					echo " download of pgl.yoyo.org hosts file failed, keeping blocking list"
+					logger -t Diversion "download of pgl.yoyo.org hosts file failed, keeping blocking list"
+					cp "${blockinglist}" "$blockinglistPrev"
+				fi
+			fi
+		fi
+
+		rm -f "${temp_hosts}" "${whitelist}.tmp" "${blockinglist}.tmp"
+
+		if [ "$hostedWL" = "on" ] || [ "$hostedBL" = "on" ] || [ "$hostedWCBL" = "on" ]; then
+			echo
+			echo " downloading hosted list(s)"
+
+			get_hosted_list(){
+				echo
+				rm -f "${DIVERSION_DIR}/list/$2.new" "${DIVERSION_DIR}/list/$2.tmp" "${DIVERSION_DIR}/list/$2.bak"
+				# mv named lists to hosted_<list> (remove line in subsequent update)
+				[ -f "${DIVERSION_DIR}/backup/$2" ] && mv "${DIVERSION_DIR}/backup/$2" "${DIVERSION_DIR}/backup/hosted_$2"
+
+				if [ -f "${DIVERSION_DIR}/backup/hosted_$2" ]; then
+					localmd5="$(md5sum "${DIVERSION_DIR}/backup/hosted_$2" | awk '{print $1}')"
+					remotemd5="$(/usr/sbin/curl -fsL --insecure --retry 3 "$1" | dos2unix | md5sum | awk '{print $1}')"
+
+					if [ "$localmd5" != "$remotemd5" ]; then
+						echo " remote file newer: getting new hosted $2"
+						echo " $1"
+						curl_dl "$1" >"${DIVERSION_DIR}/list/$2.new"
+					else
+						echo " remote file same: using local hosted $2"
+						echo " $1"
+						cp "${DIVERSION_DIR}/backup/hosted_$2" "${DIVERSION_DIR}/list/$2.new"
+					fi
+				else
+					echo " no local file: getting new hosted $2"
+					echo " $1"
+					curl_dl "$1" >"${DIVERSION_DIR}/list/$2.new"
+				fi
+
+				if [ -s "${DIVERSION_DIR}/list/$2.new" ]; then
+					dos2unix "${DIVERSION_DIR}/list/$2.new" || true
+					cp "${DIVERSION_DIR}/list/$2.new" "${DIVERSION_DIR}/list/$2.bak"
+					trim_file "${DIVERSION_DIR}/list/$2.new"
+					if [ "$2" = "blacklist" ]; then
+						convert_to_ip(){ sed -i "s/^[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/$1/g" "$2";}
+						/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/$2.new" \
+						| awk '!/ [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$|\*/' \
+						| sort -u >"${DIVERSION_DIR}/list/$2.tmp"
+						convert_to_ip $blockingIP "${DIVERSION_DIR}/list/$2.tmp"
+
+						if [ -s "${DIVERSION_DIR}/list/$2.tmp" ] && /opt/bin/grep -q "^$blockingIP" "${DIVERSION_DIR}/list/$2.tmp"; then
+							if [ "$(wc -l < ${DIVERSION_DIR}/list/$2.tmp)" -gt "1000" ]; then
+								echo " hosted $2 is above the limit of 1000 domains, keeping existing $2"
+								logger -t Diversion "hosted $2 is above the limit of 1000 domains, keeping existing $2"
+							else
+								mv "${DIVERSION_DIR}/list/$2.tmp" "${DIVERSION_DIR}/list/$2"
+								mv "${DIVERSION_DIR}/list/$2.bak" "${DIVERSION_DIR}/backup/hosted_$2"
+								echo " processing hosted $2 done"
+							fi
+						else
+							echo " hosted $2 unsupported formatting, keeping existing $2"
+							logger -t Diversion "hosted $2 unsupported formatting, keeping existing $2"
+						fi
+					else
+						/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/$2.new" \
+						| awk '!/[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* |\*/' \
+						| sort -u >"${DIVERSION_DIR}/list/$2.tmp"
+
+						if [ -s "${DIVERSION_DIR}/list/$2.tmp" ]; then
+							domaintest=$(/opt/bin/grep -m1 "" "${DIVERSION_DIR}/list/$2.tmp")
+							if [ "$(expr index "$domaintest" .)" -eq "0" ]; then
+								echo " hosted $2 contains no domains, keeping existing $2"
+								logger -t Diversion "hosted $2 contains no domains, keeping existing $2"
+							else
+								if [ "$(wc -l < ${DIVERSION_DIR}/list/$2.tmp)" -gt "1000" ]; then
+									echo " hosted $2 is above the limit of 1000 domains, keeping existing $2"
+									logger -t Diversion "hosted $2 is above the limit of 1000 domains, keeping existing $2"
+								else
+									mv "${DIVERSION_DIR}/list/$2.tmp" "${DIVERSION_DIR}/list/$2"
+									mv "${DIVERSION_DIR}/list/$2.bak" "${DIVERSION_DIR}/backup/hosted_$2"
+									echo " processing hosted $2 done"
+								fi
+							fi
+						else
+							echo " hosted $2 unsupported formatting, keeping existing $2"
+							logger -t Diversion "hosted $2 unsupported formatting, keeping existing $2"
+						fi
+					fi
+				else
+					echo
+					echo " hosted $2 download failed or empty file, keeping existing hosted $2"
+					logger -t Diversion "hosted $2 download failed or empty file, keeping existing hosted $2"
+				fi
+				rm -f "${DIVERSION_DIR}/list/$2.new" "${DIVERSION_DIR}/list/$2.tmp" "${DIVERSION_DIR}/list/$2.bak"
+			}
+
+			if [ "$hostedWL" = "on" ]; then
+				get_hosted_list $hostedWLUrl whitelist
+				echo " $(echo $hostedWLUrl | sed 's#http[s]*://##;s#/.*##')$" >>"${whitelist}.tmp"
+			fi
+			if [ "$hostedBL" = "on" ]; then
+				get_hosted_list $hostedBLUrl blacklist
+				echo " $(echo $hostedBLUrl | sed 's#http[s]*://##;s#/.*##')$" >>"${whitelist}.tmp"
+			fi
+			if [ "$hostedWCBL" = "on" ]; then
+				get_hosted_list $hostedWCBLUrl wc_blacklist
+				echo " $(echo $hostedWCBLUrl | sed 's#http[s]*://##;s#/.*##')$" >>"${whitelist}.tmp"
+			fi
+		fi
+
+		# Hard coded whitelist 1/2: Ensure firmware updates, apps and scripts work as intended
+		essential_whitelist(){
+			cat <<-EOF >>"$1"
+			 1drv.ms$
+			 asuswrt-merlin.net$
+			 asuswrt.lostrealm.ca$
+			 bin.entware.net$
+			 codeload.github.com$
+			 diversion.ch$
+			 hostfiles.frogeye.fr$
+			 fwupdate.asuswrt-merlin.net$
+			 hosts.oisd.nl$
+			 maurerr.github.io$
+			 onedrive.live.com$
+			 pgl.yoyo.org$
+			 pkg.entware.net$
+			 raw.githubusercontent.com$
+			 smallnetbuilder.com$
+			 snbforums.com$
+			 someonewhocares.org$
+			 sourceforge.net$
+			 winhelp2002.mvps.org$
+			 www.asuswrt-merlin.net$
+			 www.smallnetbuilder.com$
+			 www.snbforums.com$
+			EOF
+		}
+
+		rm -f "${whitelist}.tbr" "${DIVERSION_DIR}/list/tmp_essential_whitelist"
+		/opt/bin/grep "^[^#]" "${whitelist}" | awk '{print $1}' | awk '!/[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* |\*/' \
+		| sed -e 's/^/ /' >"${whitelist}.tbr"
+
+		for wlist in /jffs/addons/shared-whitelists/shared-*-whitelist; do
+			if [ -s "$wlist" ] && [ "$wlist" != "/jffs/addons/shared-whitelists/shared-Diversion-whitelist" ]; then
+				/opt/bin/grep "^[^#]" "$wlist" | sed 's#http[s]*://##;s#/.*##;s/^[ \t]*//;s/^/ /' >>"${whitelist}.tbr"
+			fi
+		done
+
+		essential_whitelist "${whitelist}.tbr"
+		essential_whitelist "${DIVERSION_DIR}/list/tmp_essential_whitelist"
+
+		sed -i 's/\./\\./g;s/$$//g' "${whitelist}.tbr"
+		sort -u "${whitelist}.tbr" -o "${whitelist}.tbr"
+
+		if [ -s "${DIVERSION_DIR}/list/blacklist" ]; then
+			rm -f "${DIVERSION_DIR}/list/blacklist.removed"
+
+			for line in $(cat ${whitelist}.tbr); do
+				if grep -q " $line$\| $line " "${DIVERSION_DIR}/list/blacklist"; then
+					echo " $line" | sed 's/\\//g' >>"${DIVERSION_DIR}/list/blacklist.removed"
+					sed -i "/ $line/d" "${DIVERSION_DIR}/list/blacklist"
+				fi
+			done
+
+			if [ -s "${DIVERSION_DIR}/list/blacklist.removed" ]; then
+				echo
+				echo " whitelisted domain(s) removed from the blacklist:"
+				column "${DIVERSION_DIR}/list/blacklist.removed"
+				logger -t Diversion "whitelisted domain(s) were removed from the blacklist. Use el, 2 to see which"
+			fi
+
+		fi
+
+		if [ -s "${DIVERSION_DIR}/list/wc_blacklist" ]; then
+			rm -f "${DIVERSION_DIR}/list/wc_blacklist.removed"
+
+			for line in $(cat ${whitelist}.tbr); do
+				if grep -q "^$line$\|^$line #" "${DIVERSION_DIR}/list/wc_blacklist"; then
+					echo " $line" | sed 's/\\//g' >>"${DIVERSION_DIR}/list/wc_blacklist.removed"
+					sed -i "/^$line/d" "${DIVERSION_DIR}/list/wc_blacklist"
+				fi
+			done
+
+			if [ -s "${DIVERSION_DIR}/list/wc_blacklist.removed" ]; then
+				echo
+				echo " whitelisted domain(s) removed from the wildcard-blacklist:"
+				column "${DIVERSION_DIR}/list/wc_blacklist.removed"
+				logger -t Diversion "whitelisted domain(s) were removed from the wildcard-blacklist. Use el, 3 to see which"
+			fi
+		fi
+
+		rm -f "${whitelist}.tbr"
+
+		echo
+		echo " preparing temporary whitelist"
+
+		if [ "$bfFs" = "on" ]; then
+			echo
+			getHostsFs="$getHosts ""$(/opt/bin/grep "^[^#]" ${DIVERSION_DIR}/list/$otherHL)"
+			for hosts in ${getHostsFs}; do
+				echo " $(echo $hosts | sed 's#http[s]*://##;s#/.*##')$" >>"${whitelist}.tmp"
+			done
+		else
+			for hosts in ${getHosts}; do
+				echo " $(echo $hosts | sed 's#http[s]*://##;s#/.*##')$" >>"${whitelist}.tmp"
+			done
+		fi
+
+		essential_whitelist "${whitelist}.tmp"
+
+		# Hard coded whitelist 2/2: Support smallnetbuilder.com, add domain to blacklist if you absolutely must
+		cat <<-EOF >>"${whitelist}.tmp"
+		 aax-eu.amazon-adsystem.com$
+		 aax-us-east.amazon-adsystem.com$
+		 cdn.staticneo.com$
+		 clarium.global.ssl.fastly.net$
+		 fls-na.amazon-adsystem.com$
+		 ib.adnxs.com$
+		 images-na.ssl-images-amazon.com$
+		 ir-na.amazon-adsystem.com$
+		 ir-uk.amazon-adsystem.com$
+		 pagead2.googlesyndication.com$
+		 wms-eu.amazon-adsystem.com$
+		 wms-na.amazon-adsystem.com$
+		 wms-na.assoc-amazon.com$
+		 ws-eu.amazon-adsystem.com$
+		 ws-na.amazon-adsystem.com$
+		 z-na.amazon-adsystem.com$
+		EOF
+
+		echo " preserving assembled hardcoded whitelist"
+		cat "${whitelist}.tmp" | sort -u > "${DIVERSION_DIR}/list/tmp_hardcoded_whitelist"
+
+		if [ -s "$whitelist" ]; then
+			/opt/bin/grep "^[^#]" "${whitelist}" | awk '{print $1}' | awk '!/[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* |\*/' | sed -e 's/^/ /;s/$/$/' >>"${whitelist}.tmp"
+		else
+			[ ! -f "$whitelist" ] && echo " Notice: No $whitelist found, please investigate..."
+		fi
+
+		cat "${whitelist}.tmp" | sed 's/^ *//g;s/$$//g' | sort -u >  /jffs/addons/shared-whitelists/shared-Diversion-whitelist
+
+		echo " updated shared-Diversion-whitelist"
+
+		if [ -f "/jffs/scripts/firewall" ] && grep -q "sh /jffs/scripts/firewall" /jffs/scripts/firewall-start 2> /dev/null; then
+			echo
+			echo " refreshing Skynet to whitelist domains in shared-Diversion-whitelist"
+
+			if [ -f "/tmp/skynet.lock" ]; then
+				echo
+				echo " Skynet lockfile detected"
+				i=16
+				until [ "$i" -eq "0" ]; do
+					i=$(($i-1))
+					if [ -f "/tmp/skynet.lock" ]; then
+						echo " Waiting for Skynet to finish task..."
+						sleep 2
+					else
+						i=0
+					fi
+				done
+				if [ -f "/tmp/skynet.lock" ]; then
+					echo " Unable to refresh Skynet to whitelist domains in shared-Diversion-whitelist."
+					echo " Restart Skynet manually to immediately include the new whitelisted domains."
+				fi
+			fi
+			if [ ! -f "/tmp/skynet.lock" ]; then
+				sh /jffs/scripts/firewall whitelist refresh >/dev/null 2>&1
+				echo " shared-Diversion-whitelist refreshed in Skynet"
+			fi
+		fi
+
+		echo ' localhost.localdomain$' >>"${whitelist}.tmp"
+
+		for wlist in /jffs/addons/shared-whitelists/shared-*-whitelist; do
+			if [ -s "$wlist" ] && [ "$wlist" != "/jffs/addons/shared-whitelists/shared-Diversion-whitelist" ]; then
+				echo " including $wlist in $NAME"
+				/opt/bin/grep "^[^#]" "$wlist" | sed 's#http[s]*://##;s#/.*##;s/^[ \t]*//;s/^/ /;s/$/$/' >>"${whitelist}.tmp"
+			fi
+		done
+
+		sort -u "${whitelist}.tmp" -o "${whitelist}.tmp"
+		sed -i 's/\./\\./g' "${whitelist}.tmp"
+
+		download_hosts(){
+			if [ "$lc" -eq "$lcs" ]; then
+				lct=$lcs
+			else
+				lct="$lcs (omitting $(($lc-$lcs)) duplicate)"
+			fi
+
+			echo
+			[ "$bfFs" = "on" ] && cbft=" ($currBFType)" || cbft=
+			echo " downloading $currType$cbft blocking list, $lct file(s)"
+			[ "$(nvram get ipv6_service)" != "disabled" ] && ipv6on=", adding \"::\" as IPv6 blocking IP"
+			echo " using $blockingIP as blocking IP$ipv6on"
+
+			i=1
+			for hosts in ${getHosts}; do
+				echo
+				echo " processing file $i of $lct"
+
+				hostsfile="${DIVERSION_DIR}/backup/hostsfile_$(echo $hosts | sed 's#http[s]*://##;s#/#-#g;s#?#-#g;s#=.*##g')"
+				hf_inuse="${DIVERSION_DIR}/backup/inuse_$(echo $hosts | sed 's#http[s]*://##;s#/#-#g;s#?#-#g;s#=.*##g')"
+
+				[ -f "${hostsfile}" ] && cp "${hostsfile}" "${hf_inuse}"
+
+				if [ -f "${hf_inuse}" ]; then
+					localmd5="$(md5sum "${hf_inuse}" | awk '{print $1}')"
+					remotemd5="$(/usr/sbin/curl -fsL --insecure --retry 3 "$hosts" | dos2unix | md5sum | awk '{print $1}')"
+
+					if [ "$localmd5" != "$remotemd5" ]; then
+						echo " remote file newer: getting new file"
+						echo " $hosts"
+						curl_dl "$hosts" >"${hf_inuse}"
+					else
+						echo " remote file same: using local file"
+						echo " $hosts"
+					fi
+				else
+					echo " no local file: getting new file"
+					echo " $hosts"
+					curl_dl "$hosts" >"${hf_inuse}"
+				fi
+
+				process_hf(){
+					if [ -f "${hf_inuse}" ]; then
+						dos2unix "${hf_inuse}" || true
+						if expr "$(grep -m1 "^[^#]" "${hf_inuse}" | awk '{print $1}')" : '[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' >/dev/null; then
+							echo " file is in hosts file format (IP-domain pair)"
+							/opt/bin/grep "^[^#]" "${hf_inuse}" \
+							| sed -e "s/^[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/X/g" | /opt/bin/grep -P '^[[:ascii:]]+$' \
+							| /opt/bin/grep -w "^X" | awk '{print " "$2}' | /opt/bin/grep -E '[[:alnum:]]+[.][[:alnum:]_.-]+' \
+							| awk '!/ [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/' | awk '!/[:?\/;]/' >"${hf_inuse}.tmp"
+						else
+							echo " file is in domains only format"
+							/opt/bin/grep "^[^#]" "${hf_inuse}" | /opt/bin/grep -P '^[[:ascii:]]+$' \
+							| awk '{print " "$1}' | /opt/bin/grep -E '[[:alnum:]]+[.][[:alnum:]_.-]+' \
+							| awk '!/ [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/' | awk '!/[:?\/;]/' >"${hf_inuse}.tmp"
+						fi
+
+						if [ -s "${hf_inuse}.tmp" ]; then
+							cat "${hf_inuse}.tmp" >>"${temp_hosts}"
+							rm "${hf_inuse}.tmp"
+							echo " processing file $i done"
+						else
+							rm "${hf_inuse}.tmp" "${hf_inuse}"
+							if [ -f "${hostsfile}" ]; then
+								echo " $hosts"
+								echo " not hosts file, using backup file"
+								logger -t Diversion "$hosts not hosts file, using backup file"
+								mv "${hostsfile}" "${hf_inuse}"
+								process_hf
+							else
+								echo " $hosts"
+								echo " not hosts file, no backup found"
+								logger -t Diversion "$hosts not hosts file, no backup found"
+							fi
+						fi
+					else
+						if [ -f "${hostsfile}" ]; then
+							echo " $hosts"
+							echo " download failed, using backup file"
+							logger -t Diversion "$hosts download failed, using backup file"
+							mv "${hostsfile}" "${hf_inuse}"
+							process_hf
+						else
+							echo " $hosts"
+							echo " download failed, no backup found"
+							logger -t Diversion "$hosts download failed, no backup found"
+						fi
+					fi
+				}
+				process_hf
+
+				i=$((i+1))
+			done
+
+			if [ -s "$temp_hosts" ]; then
+				echo
+				echo " removing whitelisted domains in blocking list, sorting file"
+				echo
+				/opt/bin/grep -vf "${whitelist}.tmp" "${temp_hosts}" | sort -u >"${blockinglist}.tmp"
+
+				echo " writing $currType$cbft blocking list"
+				echo
+				if [ -s "${blockinglist}.tmp" ]; then
+					sed -i '1s/^/ diversion-adblocking-ip.address/' "${blockinglist}.tmp"
+					write_blockinglist
+					if [ "$(nvram get ipv6_service)" != "disabled" ]; then
+						echo " adding IPv6 blocking entries"
+						echo
+						sed -e "s/$blockingIP/::/g" "${blockinglist}" >"${blockinglist}.tmp"
+						cat "${blockinglist}.tmp" >>"${blockinglist}"
+					fi
+				else
+					if [ -f "$blockinglistPrev" ]; then
+						echo " sorting of ${blockinglist} file failed, using previous file"
+						logger -t Diversion "sorting of ${blockinglist} file failed, using previous file"
+						mv -f "$blockinglistPrev" "${blockinglist}"
+					fi
+				fi
+				rm -f "${temp_hosts}" "${blockinglist}.tmp" "${blockinglist}.prev"
+
+				if [ "$(nvram get ipv6_service)" != "disabled" ] && ! grep -wq "^::" "${DIVERSION_DIR}/list/blacklist"; then
+					sed -e "s/$blockingIP/::/g" "${DIVERSION_DIR}/list/blacklist" >/tmp/blacklist
+					cat /tmp/blacklist >>"${DIVERSION_DIR}/list/blacklist"
+					rm /tmp/blacklist
+				fi
+
+				BD="$(($(/opt/bin/grep "^[^#]" "${blockinglist}" | wc -w)-$(/opt/bin/grep "^[^#]" "${blockinglist}" | wc -l)))"
+				BD="$((BD+$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/blacklist" | wc -l)))"
+				[ "$(nvram get ipv6_service)" != "disabled" ] && BD="$((BD/2))"
+				BD="$((BD+$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/wc_blacklist" | wc -l)))"
+
+				logger -t Diversion "updated $currType$cbft blocking list from $lct hosts files, $BD domains are now blocked"
+				[ "$HL" = "hostslist" ] && blockedDomains=$BD || blockedDomainsFs=$BD
+
+				if [ "$lastBF" = "yes" ]; then
+					edited_whitelist=
+					edited_blacklist=
+					edited_wc_blacklist=
+					bfUpdateLastRun="$(date +"%b %d %T")"
+					write_conf
+
+					[ -f "${DIVERSION_DIR}/list/blockinglist.prev" ] && mv "${DIVERSION_DIR}/list/blockinglist.prev" "${DIVERSION_DIR}/list/blockinglist"
+					[ -f "${DIVERSION_DIR}/list/blockinglist_fs.prev" ] && mv "${DIVERSION_DIR}/list/blockinglist_fs.prev" "${DIVERSION_DIR}/list/blockinglist_fs"
+
+					kill -HUP $(pidof dnsmasq)
+					rm -f "${temp_hosts}" "${whitelist}.tmp" "${blockinglist}.tmp"
+					sync; echo 3 > /proc/sys/vm/drop_caches
+
+					activeHosts=$(/opt/bin/grep "^[^#]" ${DIVERSION_DIR}/list/hostslist);
+					[ "$bfFs" = "on" ] && activeHosts="$activeHosts ""$(/opt/bin/grep "^[^#]" ${DIVERSION_DIR}/list/hostslist_fs)"
+					for i in $activeHosts; do
+						activeHF="${DIVERSION_DIR}/backup/hostsfile_$(echo $i | sed 's#http[s]*://##;s#/#-#g;s#?#-#g;s#=.*##g')"
+						activeHFinuse="${DIVERSION_DIR}/backup/inuse_$(echo $i | sed 's#http[s]*://##;s#/#-#g;s#?#-#g;s#=.*##g')"
+						[ -f "${activeHF}" ] && mv -f "${activeHF}" "${activeHFinuse}"
+					done
+
+					if [ "$(find ${DIVERSION_DIR}/backup/ -name 'hostsfile*')" ]; then
+						for i in "${DIVERSION_DIR}/backup/hostsfile"*; do
+							rm -f "${i}"
+						done
+					fi
+					for i in "${DIVERSION_DIR}/backup/inuse"*; do
+						mv -f "${i}" "${i/inuse/hostsfile}"
+					done
+				fi
+
+				echo " update $currType$cbft blocking list complete"
+			else
+				if [ -f "$blockinglistPrev" ]; then
+					echo " update of $currType$cbft blocking list failed completely, using previous file"
+					logger -t Diversion "update of $currType$cbft blocking list failed completely, using previous file"
+					mv -f "$blockinglistPrev" "${blockinglist}"
+				else
+					echo " update of $currType$cbft blocking list failed completely, no blocking list in use"
+					logger -t Diversion "update of $currType$cbft blocking list failed completely, no blocking list in use"
+				fi
+
+				if [ "$lastBF" = "yes" ]; then
+					bfUpdateLastRun="$(date +"%b %d %T")"
+					write_conf
+
+					[ -f "${DIVERSION_DIR}/list/blockinglist.prev" ] && mv "${DIVERSION_DIR}/list/blockinglist.prev" "${DIVERSION_DIR}/list/blockinglist"
+					[ -f "${DIVERSION_DIR}/list/blockinglist_fs.prev" ] && mv "${DIVERSION_DIR}/list/blockinglist_fs.prev" "${DIVERSION_DIR}/list/blockinglist_fs"
+
+					echo
+					kill -HUP $(pidof dnsmasq)
+					rm -f "${temp_hosts}" "${whitelist}.tmp" "${blockinglist}.tmp"
+					sync; echo 3 > /proc/sys/vm/drop_caches
+					for file in "${DIVERSION_DIR}/backup/inuse"*; do
+						mv -f "${file}" "${file/inuse/hostsfile}"
+					done
+				fi
+			fi
+		}
+		download_hosts
+
+		if [ "$lastBF" = "no" ]; then
+			lastBF=yes
+			HL=hostslist_fs
+			otherHL=hostslist
+			blockinglist="${DIVERSION_DIR}/list/blockinglist_fs"
+			currType=$bfTypeFs
+			currBFType=secondary
+			count_hosts
+			download_hosts
+		fi
+
+		if [ "$reset" = "1" ] && [ -f "/opt/var/log/dnsmasq.log" ]; then
+			diversion count_ads reset
+			rm -f /opt/var/log/dnsmasq.log*
+			touch /opt/var/log/dnsmasq.log /opt/var/log/dnsmasq.log1 /opt/var/log/dnsmasq.log2
+			if [ "$bfFs" = "on" ] && [ "$alternateBF" = "on" ]; then
+				touch /opt/var/log/dnsmasq.log3 /opt/var/log/dnsmasq.log4 /opt/var/log/dnsmasq.log5
+			fi
+			chown nobody /opt/var/log/dnsmasq.log*
+			chmod 0640 /opt/var/log/dnsmasq.log*
+			kill -USR2 $(pidof dnsmasq)
+			logger -t Diversion "reset dnsmasq log files (weekly cron job)"
+		fi
+	}
+
+	echo "$NAME blocking list update log $(date -R)" >"${DIVERSION_DIR}/log/Update-blocking-list.log"
+	echo "____________________________________________________" >>"${DIVERSION_DIR}/log/Update-blocking-list.log"
+	echo >>"${DIVERSION_DIR}/log/Update-blocking-list.log"
+	update_blockingfile | tee -a "${DIVERSION_DIR}/log/Update-blocking-list.log"
+else
+	echo " no config file found, exiting..."
+	logger -t Diversion "diversion.conf file not found, not updating blocking list"
+fi
+
+#eof

@@ -1,0 +1,116 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+ACTION=$1
+CALLER=$2
+
+start() {
+    [ "$CRITICAL" != "yes" -a "$CALLER" = "cron" ] && return 7
+        [ "$ENABLED" != "yes" ] && return 8
+    echo -e -n " Starting $DESC..."
+    if [ -n "`pidof $PROC`" ]; then
+        echo -e " already running"
+        return 0
+    fi
+    $PRECMD > /dev/null 2>&1
+    $PREARGS $PROC $ARGS > /dev/null 2>&1 &
+    #echo $PREARGS $PROC $ARGS
+    COUNTER=0
+    LIMIT=10
+    while [ -z "`pidof $PROC`" -a "$COUNTER" -le "$LIMIT" ]; do
+        sleep 1;
+        COUNTER=`expr $COUNTER + 1`
+    done
+    $POSTCMD > /dev/null 2>&1
+
+    if [ -z "`pidof $PROC`" ]; then
+        echo -e " failed"
+		logger -t "$entVersion" "Failed to start $DESC"
+        return 255
+    else
+        echo -e " done"
+		logger -t "$entVersion" "Started $DESC"
+        return 0
+    fi
+}
+
+stop() {
+    case "$ACTION" in
+        stop | restart)
+            echo -e -n " Shutting down $PROC..."
+            killall $PROC 2>/dev/null
+            COUNTER=0
+            LIMIT=10
+            while [ -n "`pidof $PROC`" -a "$COUNTER" -le "$LIMIT" ]; do
+                sleep 1;
+                COUNTER=`expr $COUNTER + 1`
+            done
+            ;;
+        kill)
+            echo -e -n " Killing $PROC..."
+            killall -9 $PROC 2>/dev/null
+            ;;
+    esac
+
+    if [ -n "`pidof $PROC`" ]; then
+        echo -e " failed"
+        return 255
+    else
+        echo -e " done"
+        return 0
+    fi
+}
+
+check() {
+	echo -e -n " Checking $DESC... "
+    if [ -n "`pidof $PROC`" ]; then
+		echo -e " alive";
+        return 0
+    else
+        echo -e " dead";
+        return 1
+    fi
+}
+
+reconfigure() {
+    SIGNAL=SIGHUP
+    echo -e " Sending $SIGNAL to $PROC..."
+    killall -$SIGNAL $PROC 2>/dev/null
+}
+
+
+for PROC in $PROCS; do
+    case $ACTION in
+        start)
+            start
+            ;;
+        stop | kill )
+            check && stop
+            ;;
+        restart)
+            check > /dev/null && stop
+            start
+            ;;
+        check)
+            check
+            ;;
+        reconfigure)
+            reconfigure
+            ;;
+        *)
+            echo -e " Usage: $0 (start|stop|restart|check|kill|reconfigure)"
+            exit 1
+            ;;
+    esac
+done
+#eof

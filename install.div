@@ -1,0 +1,1926 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+install_diversion(){
+	needsReboot=0
+	check_firmware
+	check_internet
+	check_router
+	echo
+	check_jffconfigs
+	[ "$action" = "install" ] && check_prev_install
+	if [ "$action" = "install" ] || [ "$action" = "upgrade" ]; then
+		select_edition
+	fi
+	if [ "$EN" -ge "2" ]; then
+		case "$action" in
+			re-install|install-from-backup|restore)	reserve_ip;;
+		esac
+	fi
+	select_logging
+	check_entware
+	make_directories
+	write_b_w_list
+	[ "$EN" -ge "2" ] && check_pixelserv
+	set_defaults
+	write_jffsfile
+	initialize_diversion
+}
+
+update_diversion(){
+	echo
+	needsReboot=0
+	check_firmware update
+	check_router
+	check_previous_version
+	check_jffconfigs
+	if [ "$EN" -ge "2" ]; then
+		reserve_ip
+	fi
+	check_entware
+	make_directories
+	write_b_w_list
+	set_defaults
+	write_jffsfile
+	initialize_diversion
+}
+
+version_check(){ echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }';}
+
+check_firmware(){
+	echo "${INFO} Checking router"
+	if [ -z "$1" ]; then
+		case "$(uname -m)" in
+			mips)		PART_TYPES='ext2|ext3'
+						INST_URL='http://pkg.entware.net/binaries/mipsel/installer/installer.sh'
+						entVer="Entware (mipsel)";;
+			armv7l)		PART_TYPES='ext2|ext3|ext4'
+						INST_URL='http://bin.entware.net/armv7sf-k2.6/installer/generic.sh'
+						entVer="Entware (armv7)";;
+			aarch64)	PART_TYPES='ext2|ext3|ext4'
+						INST_URL='http://bin.entware.net/aarch64-k3.10/installer/generic.sh'
+						entVer="Entware (aarch64)";;
+			*)			lastError=" $(uname -m) is an unsupported platform\\n to install $NAME on."
+						reload_d_menu;;
+		esac
+
+		case "$(grep -oE 'merlin|OpenWrt|padavan' /proc/version)" in
+			merlin) 	echo "${OK} Asuswrt-Merlin";;
+			OpenWrt) 	lastError=" $NAME does not run on OpenWrt/DD-WRT firmware."
+						reload_d_menu;;
+			padavan) 	lastError=" $NAME does not run on padavan firmware."
+						reload_d_menu;;
+			*)			if [ "$(uname -o | grep -iw Merlin$)" ]; then
+							echo "${OK} Asuswrt-Merlin"
+						elif [ "$(uname -o | grep -iw Merlin-LTS)" ]; then
+							echo "${OK} Asuswrt-Merlin-LTS"
+						elif [ "$(nvram get buildinfo | grep -iw merlin)" ]; then
+							echo "${OK} Asuswrt-Merlin"
+						else
+							print_red_line
+							echo "${ERR} $NAME cannot determine if this"
+							echo " router runs on Asuswrt-Merlin based firmware.\\n"
+							echo " Common Asuswrt-Merlin forks are:"
+							echo " - 374.43 LTS by @john9527"
+							echo " - HGG by @hggomes"
+							echo " - Xwrt-Vortex by @XVortex"
+							echo
+							echo " Note: DO NOT install $NAME on"
+							echo " non-Asuswrt-Merlin based firmware.\\n"
+							echo " Does this router run Asuswrt-Merlin based firmware?"
+							while true;do
+								printf "\\n Confirm compatible firmware [1=Yes 2=No] ";read -r continue
+								case "$continue" in
+									1)	echo;echo "${INFO} continuing checks";break;;
+									2)	lastError=" No supported firmware found to install on"
+										reload_d_menu;break;;
+									*)	printf "\\n input is not an option\\n";;
+								esac
+							done
+						fi;;
+		esac
+	fi
+
+	if [ "$(nvram get sw_mode)" != "1" ]; then
+		case "$(nvram get sw_mode)" in
+			2)	rtrMode="Repeater";;
+			3|4)rtrMode="Access Point (AP) or Media Bridge";;
+		esac
+		lastError=" Router is in $rtrMode mode,\\n $NAME cannot work in this mode."
+		reload_d_menu
+	else
+		echo "${OK} Wireless router mode"
+	fi
+
+	if [ -z "$(which dos2unix)" ]; then
+		lastError=" Your router's firmware is missing dos2unix\\n Please investigate."
+		reload_d_menu
+	else
+		echo "${OK} dos2unix"
+	fi
+
+	if [ -z "$1" ]; then
+		if netstat -tuln | grep ":80 " | grep -q '0\.0\.0\.0:80 ' >/dev/null; then
+			print_red_line
+			if [ "$(version_check $(nvram get buildno))" -lt "$(version_check '380.61')" ];then
+
+				echo "${NOK} Your router's firmware ($(nvram get buildno)) is too old to"
+				echo "${SPACE} run $NAME Standard Edition,"
+				echo "${SPACE} only the Lite Edition can be installed."
+				echo
+				echo "${SPACE} Upgrade your routers firmware first before"
+				echo "${SPACE} attempting to install Standard Edition."
+				netstatnok=1
+
+				echo " 1. Continue, installing $NAME Lite Edition"
+				echo " 2. Abort installation"
+				while true; do
+					printf "\\n Enter your selection [1-2] ";read -r continue
+					case "$continue" in
+						1)	break;;
+						2)	lastError=" Install aborted, firmware ($(nvram get buildno))\\n is too old."
+							reload_d_menu;break;;
+						*)	printf "\\n input is not an option\\n";;
+					esac
+				done
+				echo
+			else
+				echo "${ATTN} Port 80 is listening on 0.0.0.0, this might"
+				echo "${SPACE} affect pixelserv-tls from working properly"
+				echo "${SPACE} with $NAME Standard Edition installed."
+				echo
+				echo " Here's the netstat output:"
+				echo
+				netstat -tuln | grep ":80 " | grep '0\.0\.0\.0:80 '
+				echo
+				echo " 1. Continue, pixelserv-tls will work in your opinion"
+				echo " 2. Continue, installing $NAME Lite Edition"
+				while true;do
+					printf "\\n Enter your selection [1-2] ";read -r continue
+					case "$continue" in
+						1)	break;;
+						2)	netstatnok=1;break;;
+						*)	printf "\\n input is not an option\\n";;
+					esac
+				done
+				echo
+			fi
+		else
+			echo "${OK} Netstat"
+		fi
+		i=1
+		for mounted in $(/bin/mount | grep -E "$PART_TYPES" | cut -d" " -f3); do
+			eval mounts$i="$mounted"
+			if [ "$action" = "install" ]; then
+				if [ -s "$mounted/entware/share/diversion/.conf/diversion.conf" ]; then
+					[ -z "$restoreDev" ] && restoreDev="$mounted"
+				elif [ -z "$restoreDev" ] && [ -s "$mounted/adblocking/.config/ab-solution.cfg" ]; then
+					portversion="$mounted"
+				elif [ -z "$restoreDev" ] && [ -z "$portversion" ] && [ -d "$mounted/adblocking" ]; then
+					rm -rf "$mounted/adblocking"
+				fi
+			fi
+			i=$((i+1))
+		done
+		if [ "$i" = "1" ]; then
+			lastError=" No compatible device(s) found to install\\n $NAME on.\\n\\n A permanently plugged in USB storage device\\n formatted with one of these file systems\\n is required: $(echo $PART_TYPES | sed -e 's/|/, /g')\\n\\n${NC}${GREEN} Use amtm to format attached USB devices\\n to any ext* file system.\\n https://diversion.ch/amtm.html"
+			reload_d_menu
+		else
+			echo "${OK} Compatible device(s)"
+		fi
+	fi
+}
+
+check_internet(){
+	if ping -c2 -W5 209.244.0.3 >/dev/null; then
+		echo "${OK} Internet"
+	else
+		echo "${NOK} Level 3 did not respond, pinging Cloudfare"
+		if ping -c2 -W5 1.1.1.1 >/dev/null; then
+			echo "${OK} Internet"
+		elif [ "$action" = "re-install" ]; then
+			echo "${NOK} No internet access detected"
+			printf "${SPACE} $NAME may not be able to download\\n${SPACE} missing files during $action.\\n"
+			press_enter_to acknowledge
+		else
+			if ping -c2 -W5 8.8.8.8 >/dev/null; then
+				echo "${OK} Internet"
+			else
+				echo "${NOK} No internet access detected."
+				printf "${SPACE} Level 3 (IP 209.244.0.3), Cloudfare (1.1.1.1)\\n"
+				printf "${SPACE} and Google (8.8.8.8) did not respond to ping.\\n"
+				printf "\\n${INFO} Check why these are non-responsive to\\n${SPACE} the ping command before continuing.\\n"
+				print_red_line
+				while true;do
+					printf "\\n Continue anyway? [1=Yes e=Exit] ";read -r continue
+					case "$continue" in
+						1)	echo;break;;
+					 [Ee])	lastError=" Check your internet access.\\n $NAME needs access to $action."
+							reload_d_menu;break;;
+						*)	printf "\\n input is not an option\\n\\n";;
+					esac
+				done
+			fi
+		fi
+	fi
+
+	ntptimer=0
+	ntptimeout=30
+	[ "$(nvram get ntp_ready)" = "1" ] && echo "${OK} NTP date is synced"
+	[ "$(nvram get ntp_ready)" = "0" ] && echo
+	while [ "$(nvram get ntp_ready)" = "0" ] && [ "$ntptimer" -lt "$ntptimeout" ]; do
+		ntptimer=$((ntptimer+1))
+		sleep 1
+		echo "${INFO} Waiting for NTP to sync date ($ntptimer/$ntptimeout s)"
+	done
+
+	if [ "$ntptimer" -ge "$ntptimeout" ]; then
+		echo
+		echo "${ERR} NTP timeout (${ntptimeout}s) reached, date is router factory default."
+		lastError=" NTP date and time not synced.\\n Make sure your router syncs the time with an\\n NTP Server in Administration / System."
+		reload_d_menu
+	fi
+}
+
+check_router(){
+	if [ -d "/jffs" ]; then
+		mkdir -p /jffs/scripts
+	else
+		lastError=" /jffs partition is not present on this\\n router, $NAME cannot $action.\\n Please investigate."
+		reload_d_menu
+	fi
+	if [ "$(nvram get jffs2_format)" = "1" ]; then
+		echo "${NOK} You have set \"Format JFFS partition at next boot\""
+		echo "${SPACE} in the router Web UI."
+		echo "${SPACE} This needs to be done before installation."
+		press_enter_to 'reboot the router now'
+		sleep 1
+		service reboot >/dev/null 2>&1 &
+		exit 0
+	fi
+	if [ "$(nvram get jffs2_scripts)" != "1" ]; then
+		echo "${INFO} JFFS custom scripts and configs were enabled"
+		nvram set jffs2_scripts=1
+		nvram commit
+	fi
+	if [ "$(nvram get dnsfilter_enable_x)" != "0" ] && [ "$(nvram get dnsfilter_mode)" != "11" ]; then
+		print_red_line
+		echo "${NOK} ${RED}DNS-based Filtering is enabled on this router${NC}"
+		echo "${SPACE} This may or may not work with $NAME."
+		echo "${SPACE} Disable it after installation/update if"
+		echo "${SPACE} ad-blocking does not work and see if that helps."
+		if [ "$(nvram get dnsfilter_custom1)" = "$aBFIP" ] || [ "$(nvram get dnsfilter_custom2)" = "$aBFIP" ] || [ "$(nvram get dnsfilter_custom3)" = "$aBFIP" ]; then
+			echo
+			echo "${OK} DNS-based Filtering is enabled for alternate"
+			echo "${SPACE} blocking list in $NAME."
+			echo "${SPACE} ${GREEN}If this is the only filtering then"
+			echo "${SPACE} you may ignore the above warning.${NC}"
+		fi
+		press_enter_to acknowledge
+	fi
+	if [ "$(nvram get lan_dns_fwd_local)" != "0" ]; then
+		echo "${INFO} Forward local domain queries to upstream DNS set to: No"
+		nvram set lan_dns_fwd_local=0
+		nvram commit
+		needsReboot=1
+	fi
+	if [ "$(nvram get dhcp_dns1_x)" ] || [ "$(nvram get dhcp_dns2_x)" ]; then
+		echo "${INFO} $NAME removed these LAN DNS Server(s):"
+		echo "${NOK} $(nvram get dhcp_dns1_x)"
+		echo "${NOK} $(nvram get dhcp_dns2_x)"
+		echo "${SPACE} otherwise $NAME will not work."
+		echo
+		echo "${SPACE} You can add them back in WAN Settings by setting the"
+		echo "${SPACE} \"Connect to DNS Server automatically\" to \"No\""
+		echo "${SPACE} and then entering your DNS Server(s) there."
+		nvram set dhcp_dns1_x=
+		nvram set dhcp_dns2_x=
+		nvram commit
+		needsReboot=1
+	fi
+
+	echo "${INFO} Router check complete"
+
+	if [ "$needsReboot" = "1" ]; then
+		print_red_line
+		echo " Changes were made that requires this router to"
+		echo " reboot after $NAME installation is completed."
+		echo
+		echo " This is necessary for $NAME to work."
+		press_enter_to acknowledge
+	fi
+}
+
+check_previous_version(){
+	[ "$thisM_VERSION" ] && THIS_VERSION="${thisVERSION}.$thisM_VERSION" || THIS_VERSION=$thisVERSION
+	if [ "$(version_check $THIS_VERSION)" -lt "$(version_check 4.1.3)" ]; then
+		needsReboot=1
+	fi
+	if [ "$needsReboot" = "1" ]; then
+		print_red_line
+		echo " $NAME changes during this update requires this"
+		echo " router to reboot after the update is completed."
+		echo
+		echo " This is necessary for $NAME to work properly."
+		press_enter_to acknowledge
+	fi
+}
+
+check_jffconfigs(){
+	if [ -f "/jffs/configs/dnsmasq.conf.add" ]; then
+		echo "${INFO} Checking dnsmasq.conf.add entries"
+		if grep -v '^ *#' /jffs/configs/dnsmasq.conf.add | grep -q 'log-async\|log-queries\|log-facility'; then
+			print_red_line
+			echo "${NOK} Found conflicting entries in"
+			echo "${SPACE} /jffs/configs/dnsmasq.conf.add"
+			echo
+			grep -v '^ *#' /jffs/configs/dnsmasq.conf.add | grep 'log-async\|log-queries\|log-facility'
+			echo
+			echo "${ATTN} These must be removed or commented out for"
+			echo "${SPACE} $NAME to work"
+			echo
+			echo " 1. You remove or comment out now"
+			echo " 2. Automatic removal by $NAME"
+			while true; do
+				printf "\\n Enter your selection [1-2] ";read -r continue
+				case "$continue" in
+					1)	print_red_line
+						grep -v '^ *#' /jffs/configs/dnsmasq.conf.add | grep 'log-async\|log-queries\|log-facility'
+						printf "\\n Remove or comment out above line(s) now in\\n /jffs/configs/dnsmasq.conf.add\\n"
+						printf "\\n${ATTN} Press [Enter] when done or for option ";read -r;echo
+						check_jffconfigs;break;;
+					2)	sed -i '/log-async/d;/log-queries/d;/log-facility/d' /jffs/configs/dnsmasq.conf.add
+						echo
+						check_jffconfigs;break;;
+					*)	printf "\\n input is not an option\\n";;
+				esac
+			done
+		else
+			echo "${OK} dnsmasq.conf.add"
+		fi
+	fi
+}
+
+check_prev_install(){
+	localDivBackup=$(find /jffs/${NAME}_*_local_backup*.tar.gz 2> /dev/null)
+	if [ "$localDivBackup" ]; then
+		mkdir -p /jffs/addons/diversion
+		mv "$localDivBackup" /jffs/addons/diversion
+	fi
+	localDivBackup=$(find /jffs/addons/diversion/${NAME}_*_local_backup*.tar.gz 2> /dev/null)
+	if [ "$restoreDev" ] || [ "$localDivBackup" ]; then
+		lan_blocking_ip_check(){
+			if [ "$EDITION" = Standard ] && [ "$LANblockingIP" = on ]; then
+				print_red_line
+				echo "${ATTN} LAN blocking IP address is enabled to"
+				echo "${SPACE} ${GREEN}$lanBIP${NC} in $NAME Standard $1"
+				echo
+				echo " With LAN blocking IP enabled, the $NAME Lite Edition"
+				echo " can be installed since pixelserv-tls is not used."
+				echo
+				echo " 1. Install $NAME Standard anyway"
+				echo " 2. Install $NAME Lite"
+				while true; do
+					printf "\\n Enter your selection [1-2] ";read -r continue
+					case "$continue" in
+						1)	print_red_line
+							EDITION=Standard
+							psState=off
+							prevPsState=off
+							echo "${OK} installing $NAME Standard"
+							echo;break;;
+						2)	print_red_line
+							EDITION=Lite
+							psState=
+							prevPsState=
+							psIP=
+							echo "${OK} installing $NAME Lite"
+							echo;break;;
+						*)	printf "\\n input is not an option\\n";;
+					esac
+				done
+			fi
+		}
+
+		print_red_line
+
+		iflb=
+		rpi=
+		newi=2
+		if [ "$localDivBackup" ]; then
+			localRestoreEdition=$(echo $localDivBackup | cut -d _ -f 2)
+			localRestoreDate=$(echo $localDivBackup | cut -d _ -f 5-8 | sed "s~.tar.gz~~;s~_~ ~g;s~\.~:~g")
+			printf "${ATTN} Found $NAME $localRestoreEdition local backup\\n${SPACE} from $localRestoreDate in /jffs/addons/diversion/\\n"
+			iflb=1
+		fi
+
+		restoreDevOK=
+		if [ -s "$restoreDev/entware/share/diversion/.conf/diversion.conf" ]; then
+			restoreDevOK=1
+			restoreDevText=" installation\\n${SPACE}"
+			restoreDevEdition=$(grep "^EDITION" "$restoreDev/entware/share/diversion/.conf/diversion.conf" | sed 's/EDITION=//')
+			if [ "$restoreDevEdition" ]; then
+				restoreDevText=" $restoreDevEdition installation\\n${SPACE}"
+				restoreDevDate=$(grep -F "adsLastCount=" "$restoreDev/entware/share/diversion/.conf/diversion.conf" | sed 's~adsLastCount=~~;s~"~~g')
+				[ -z "$restoreDevDate" ] && restoreDevDate=$(grep -F "bfUpdateLastRun=" "$restoreDev/entware/share/diversion/.conf/diversion.conf" | sed 's~bfUpdateLastRun=~~;s~"~~g')
+				[ "$restoreDevDate" ] && restoreDevText="$restoreDevText from $restoreDevDate"
+			fi
+
+			printf "${ATTN} Found previous $NAME$restoreDevText at $restoreDev/entware\\n"
+			rpi=1
+			if [ "$iflb" = 1 ]; then
+				newi=3
+				rpi=2
+			fi
+		fi
+
+		echo
+		[ "$localDivBackup" ] && printf " 1. Install from local backup in /jffs/addons/diversion/\\n"
+		[ "$restoreDevOK" ] && printf " $rpi. Restore previous installation on USB device\\n"
+		printf " $newi. New installation\\n"
+		while true;do
+			printf "\\n Enter your selection [1-$newi e=Exit] ";read -r continue
+			case "$continue" in
+				[$iflb])	action=install-from-backup
+							mkdir -p /tmp/diversion/backup
+							tar xvzf "$localDivBackup" -C /tmp/diversion/backup >/dev/null
+							if [ -f /tmp/diversion/backup/opt/share/diversion/.conf/diversion.conf ]; then
+								. /tmp/diversion/backup/opt/share/diversion/.conf/diversion.conf
+							else
+								lastError=" $NAME config file not found in backup\\n Please investigate."
+								reload_d_menu
+							fi
+
+							lan_blocking_ip_check "on the local backup."
+
+							case "$EDITION" in
+								Lite)		EN=1
+											minsize=71680
+											maxsize=102400;;
+								Standard)	EN=2
+											minsize=81920
+											maxsize=112640;;
+							esac
+							[ -z "$THEME" ] && THEME=Standard
+							theme_$THEME
+							printf "\\n${INFO} Running function $action\\n"
+							break;;
+				[$rpi])		. "$restoreDev/entware/share/diversion/.conf/diversion.conf"
+							action=restore
+
+							lan_blocking_ip_check "in the previous version."
+
+							case "$EDITION" in
+								Lite)		EN=1;;
+								Standard)	EN=2;;
+							esac
+							entDev="$restoreDev"
+							entPath="$entDev/entware"
+							ln -sf "$entPath" /tmp/opt
+							[ -z "$THEME" ] && THEME=local
+							theme_$THEME
+							printf "\\n${INFO} Running function $action\\n"
+							break;;
+				[$newi])	echo;break;;
+				[Ee])		reload_d_menu;break;;
+				*)	printf "\\n input is not an option\\n";;
+			esac
+		done
+	fi
+
+	if [ "$portversion" ]; then
+		if [ -s "$portversion/adblocking/.config/ab-solution.cfg" ]; then
+			print_red_line
+			if grep -q "^appVersionInstalled" "$portversion/adblocking/.config/ab-solution.cfg"; then
+				. "$portversion/adblocking/.config/ab-solution.cfg"
+				if [ "$appTheme" ]; then
+					THEME=$appTheme
+					theme_$THEME
+				fi
+				[ "$devVersionInstalled" != "0" ] && oldversion="$appVersionInstalled.$devVersionInstalled" || oldversion=$appVersionInstalled
+				echo "${ATTN} AB-Solution $oldversion installation found"
+			else
+				echo "${ATTN} AB-Solution 3.x installation found"
+			fi
+			echo "${SPACE} at $portversion/adblocking"
+			printf "\\n 1. Port to $NAME $VERSION (highly recommended)\\n    Keep AB-Solution $oldversion settings\\n"
+			printf " 2. Install $NAME $VERSION\\n    Discard AB-Solution $oldversion settings\\n"
+			while true;do
+				printf "\\n Enter your selection [1=Port 2=New e=Exit] ";read -r continue
+				case "$continue" in
+					1)	action=port
+						case "$loggingState" in
+							on)		logging=on;;
+							off)	logging=off;;
+						esac
+						if [ "$(which pixelserv-tls)" ]; then
+							EDITION=Standard
+							EN=2
+							blockingIP=$psIPv4
+							psIP=$psIPv4
+							entDev=$entwareDevice
+							minsize=81920
+							maxsize=112640
+						else
+							EDITION=Lite
+							EN=1
+							blockingIP=0.0.0.0
+							minsize=71680
+							maxsize=102400
+						fi
+
+						printf "\\n${INFO} Porting AB-Solution $oldversion to $NAME $VERSION $EDITION\\n"
+						break;;
+					2)	action=install
+						echo;echo "${ATTN} Removing AB-Solution $oldversion version"
+
+						[ "$entwareDevice" ] && entDev=$entwareDevice || entDev=$portversion
+						stop_old_version
+						check_old_jffs
+						restart_DNSMASQ
+						[ -s /jffs/shared-AB-whitelist ] && rm /jffs/shared-AB-whitelist
+						echo "${INFO} AB-Solution $oldversion stopped"
+						customFiles=
+						newbfType=
+						rm -r "$portversion/adblocking"
+						break;;
+					[Ee])	reload_d_menu;break;;
+					*)	printf "\\n input is not an option\\n\\n";;
+				esac
+			done
+		fi
+	fi
+
+	echo
+	[ "$action" != "restore" ] && [ "$action" != "port" ] && [ "$action" != "install-from-backup" ] && printf "${OK} All clear to $action $NAME $VERSION\\n"
+
+	if [ "$THEME" = "local" ]; then
+		echo
+		echo "${INFO} But first, let's add some color!"
+
+		amtmTheme=$(find /jffs/ -name .amtm_theme)
+		if [ -f "$amtmTheme" ]; then
+			. "$amtmTheme"
+			THEME=$theme
+		fi
+
+		if [ "$THEME" ] && [ "$THEME" != "local" ]; then
+			theme_$THEME
+			echo "${OK} Using theme set in amtm ($THEME)"
+		else
+			ct_function new
+			echo
+		fi
+	fi
+}
+
+select_edition(){
+	print_red_line
+	[ "$action" = "upgrade" ] && to=to
+	echo "${QUESTION} Select $NAME Edition to $action $to"
+
+	if [ "$netstatnok" = "1" ]; then
+		min=1 max=1 GRAY2=${GRAY} NC3=${NC}
+	elif [ "$action" = "install" ]; then
+		min=1 max=2
+	elif [ "$action" = "upgrade" ]; then
+		if [ "$EDITION" = "Lite" ]; then
+			min=2 max=2 GRAY1=${GRAY} NC1=${NC}
+		fi
+	fi
+
+	printf "\\n${GRAY1}%-26s%s\\n" " 1. $NAME Lite" "SSH UI, Entware,"
+	printf "%-26s%s${NC1}\\n" " " "blocks only http ads"
+	echo
+	printf "${GRAY2}%-26s%s\\n" " 2. $NAME Standard" "SSH UI, Entware,"
+	printf "%-26s%s${NC3}\\n" " " "package pixelserv-tls,"
+	printf "%-26s%s${NC1}\\n" " " "blocks http and https ads"
+
+	edition_loop(){
+	printf "\\n Select Edition [${min}-${max} e=Exit] ";read -r selection
+		case "$selection" in
+			1)	EDITION=Lite
+				minsize=71680
+				maxsize=102400;;
+			2)	EDITION=Standard
+				minsize=81920
+				maxsize=112640;;
+		[Ee])	exit_message;reload_d_menu;;
+			*) 	printf "\\n input is not an option\\n"
+				edition_loop;return 1;;
+		esac
+	if [ "$selection" -lt "$min" ] || [ "$selection" -gt "$max" ]; then
+		printf "\\n input is not an option\\n"
+		edition_loop;return 1
+	fi
+	}
+	edition_loop
+
+	EN=$selection
+
+	reserve_ip
+}
+
+reserve_ip(){
+	if [ "$EN" -ge "2" ]; then
+		echo
+		echo "${INFO} Checking port 443 availability"
+		port_check 9443
+		port_check 443
+		echo
+
+		if [ "$action" = "restore" ] || [ "$action" = "install-from-backup" ] && [ "$psIP" ]; then
+			dhcp_start=$(nvram get dhcp_start)
+			dhcp_end=$(nvram get dhcp_end)
+			lan_ipaddr=$(nvram get lan_ipaddr)
+			setIP=$psIP
+			echo "${INFO} Checking pixelserv-tls IP $setIP"
+			if [ "$(printf "$lan_ipaddr" | sed 's/\.[0-9]*$/./')" = "$(printf "$setIP" | sed 's/\.[0-9]*$/./')" ]; then
+				if [ "${setIP##*.}" -lt "${dhcp_start##*.}" ] && [ "${setIP##*.}" -ge "1" ]; then
+					printf "${OK} $setIP is a valid IP address\\n"
+				elif [ "${setIP##*.}" -gt "${dhcp_end##*.}" ] && [ "${setIP##*.}" -le "254" ]; then
+					printf "${OK} $setIP is a valid IP address\\n"
+				else
+					printf "\\n${NOK} $setIP is not a reserved address\\n"
+					psIP=
+				fi
+				echo
+			else
+				printf "\\n${NOK} $setIP is not a router address\\n"
+				psIP=
+			fi
+		fi
+
+		if [ -z "$psIP" ]; then
+			print_red_line
+			printf "${INFO} Reserving one IP address for pixelserv-tls\\n\\n"
+			printf "${ATTN} DO THIS NOW: Log into this routers WebUI\\n\\n"
+			echo ' - Go to LAN > DHCP Server'
+			echo ' - Adjust "IP Pool Starting Address" from the'
+			echo '   standard xxx.xxx.xxx.2 (typically 192.168.1.2)'
+			echo '   to xxx.xxx.xxx.3 (e.g 192.168.1.3)'
+			echo '   (xxx.2 would be the reserved address)'
+			echo ' - Make sure the reserved address is not used'
+			echo '   by your other devices'
+			echo ' - Then click "Apply"'
+			echo
+			echo " You will need to enter the IP address next"
+			[  "$psIP" ] && printf "\\n${INFO} The pixelserv-tls IP in use is ${GREEN}$psIP${NC}\\n"
+			press_enter_to "continue when ready"
+
+			if [ "$EN" -ge "2" ] && [ -z "$psIP" ]; then
+				print_red_line
+				select_ip "pixelserv-tls IP"
+				psIP=$setIP
+
+				otherIP=
+				otherSV=
+			fi
+
+			if [ "$psIP" ]; then
+				otherIP=$psIP
+				otherSV="pixelserv-tls IP"
+			fi
+		fi
+		set_access_restriction $psIP "pixelserv-tls"
+	fi
+}
+
+select_ip(){
+	printf " Enter $1 Address: ";read -r setIP
+
+	dhcp_start=$(nvram get dhcp_start)
+	dhcp_end=$(nvram get dhcp_end)
+	lan_ipaddr=$(nvram get lan_ipaddr)
+
+	if [ "$setIP" = "$lan_ipaddr" ]; then
+		printf "\\n${NOK} $setIP is this routers address\\n\\n"
+		select_ip "$1"
+		return 1
+	fi
+
+	if ! expr "$setIP" : '[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' >/dev/null; then
+		printf "\\n${NOK} $setIP is not a valid IP address\\n\\n"
+		select_ip "$1"
+		return 1
+	fi
+	if [ "$(printf "$lan_ipaddr" | sed 's/\.[0-9]*$/./')" = "$(printf "$setIP" | sed 's/\.[0-9]*$/./')" ]; then
+		if [ "$otherIP" ] && [ "$otherIP" = "$setIP" ]; then
+			printf "\\n${NOK} $setIP is set as $otherSV address\\n\\n"
+			select_ip "$1"
+			return 1
+		fi
+
+		if [ "${setIP##*.}" -lt "${dhcp_start##*.}" ] && [ "${setIP##*.}" -ge "1" ]; then
+			printf "\\n${OK} $setIP is a valid IP address\\n"
+		elif [ "${setIP##*.}" -gt "${dhcp_end##*.}" ] && [ "${setIP##*.}" -le "254" ]; then
+			printf "\\n${OK} $setIP is a valid IP address\\n"
+		else
+			printf "\\n${NOK} $setIP is not a reserved address\\n\\n"
+			select_ip "$1"
+			return 1
+		fi
+
+	else
+		printf "\\n${NOK} $setIP is not a router address\\n\\n"
+		select_ip "$1"
+		return 1
+	fi
+
+	printf "${INFO} checking if $setIP is available to use\\n\\n"
+
+	if ping -c2 -W5 "$setIP" >/dev/null; then
+		printf "${NOK} $setIP responded to ping\\n"
+		printf "${ATTN} nslookup info for $setIP:\\n\\n"
+		nslookup "$setIP"
+		printf "\\n${ATTN} arp info for $setIP:\\n\\n"
+		arp | grep "$setIP"
+		printf "\\n${ATTN} Do not set $1 to an IP that\\n${SPACE} is not the reserved ${1}.\\n"
+		printf "${SPACE} This will not work!\\n\\n"
+		printf " 1. Confirm this is the $1 address\\n"
+		printf " 2. Select a different IP address\\n"
+		while true;do
+			printf "\\n Enter your selection [1-2] ";read -r continue
+			case "$continue" in
+				1)	printf "\\n${OK} $1 address set to $setIP\\n";break;;
+				2)	select_ip "$1"
+					return 1;break;;
+				*)	printf "\\n input is not an option\\n";;
+			esac
+		done
+	else
+		printf "${OK} $1 address set to $setIP\\n"
+	fi
+}
+
+port_check(){
+	netstat -lnt | grep [0-9]:${1:-$1} -q;
+	if [ "$?" -eq "1" ]; then
+		if [ "$1" = "9443" ]; then
+			port9443=OK
+		else
+			echo "${OK} Port $1 is available"
+		fi
+	else
+		if [ "$(which pixelserv-tls)" ] && [ "$psIP" ] && netstat -lnt | grep "$psIP":${1:-$1} -q; then
+			echo "${OK} Port $1 is in use by pixelserv-tls"
+		elif [ "$(ps | grep "pixelserv.*" | grep -v "grep")" ]; then
+			[ "$(pidof pixelserv)" ] && psname=pixelserv
+			[ "$(pidof pixelserv-tls)" ] && psname=pixelserv-tls
+			if [ "$psname" ]; then
+				echo "${INFO} stopping running $psname process(es)"
+				kill $(pidof $psname)
+				port_check 443
+			fi
+
+		elif [ "$1" = "443" ]; then
+			if [ "$(nvram get webdav_https_port)" = "443" ] && [ "$(nvram get enable_webdav)" = "1" ] && [ "$port9443" = "OK" ]; then
+				print_red_line
+				echo "${NOK} Your AiCloud settings are set to use port 443."
+				echo
+				echo " $NAME can set it to the unused port 9443"
+				echo " so that pixelserv-tls can use port 443 (recommended)."
+				while true; do
+					printf "\\n Set AiCloud port to 9443 now? [1=Yes 2=No] ";read -r continue
+					case "$continue" in
+						1)	nvram set webdav_https_port=9443
+							nvram commit
+							service restart_webdav >/dev/null
+							printf "\\n${OK} AiCloud port changed from 443 to 9443\\n\\n";break;;
+						2)	lastError=" AiCloud port 443 needs to be set\\n to a different port if you want to use $EDITION."
+							reload_d_menu;break;;
+						*)	printf "\\n input is not an option\\n";;
+					esac
+				done
+			elif [ "$(nvram get webdav_https_port)" = "443" ] && [ "$(nvram get enable_webdav)" = "1" ] && [ "$port9443" = "NOK" ]; then
+				lastError=" AiCloud port 443 needs to be set\\n to a different port (port 9443 is in use)."
+				reload_d_menu
+			else
+				print_red_line
+				echo "${NOK} Port 443 is in use by unknown application"
+				echo "${SPACE} (AiCloud port is OK, check other applications)"
+				echo
+				echo " Here's the netstat output:"
+				echo
+				netstat -lntp | grep [0-9]:${1:-443}
+				echo
+				echo " 1. Continue, pixelserv-tls will work in your opinion"
+				echo " 2. Abort installation"
+				while true; do
+					printf "\\n Enter your selection [1-2] ";read -r continue
+					case "$continue" in
+						1)	break;;
+						2)	lastError=" Port 443 is in use by unknown application\n (AiCloud port is OK, check other applications)."
+							reload_d_menu;break;;
+						*)	printf "\\n input is not an option\\n";;
+					esac
+				done
+			fi
+		else
+			port9443=NOK
+		fi
+	fi
+}
+
+set_access_restriction(){
+	if [ "$(nvram get enable_acc_restriction)" = "1" ] && ! echo "$(nvram get restrict_rulelist)" | grep -q "$1>1"; then
+		[ "$acknotice" ] && print_red_line
+		nvram set restrict_rulelist="$(nvram get restrict_rulelist)<1>$1>1"
+		nvram commit
+		service restart_firewall >/dev/null
+
+		echo "${ATTN} Access restriction is enabled in"
+		echo "${SPACE} Administration > System."
+		echo "${SPACE} The reserved $2 address $1"
+		echo "${SPACE} has been added to the Specified IP address list."
+		[ "$acknotice" ] && press_enter_to acknowledge
+		echo
+		acknotice=
+	fi
+}
+
+select_logging(){
+	if [ -z "$logging" ]; then
+		print_red_line
+		printf "${QUESTION} Select Logging state\\n\\n"
+		printf " Dnsmasq can create a log file of all DNS queries.\\n"
+		printf " The log is helpful for the curious, will show\\n"
+		printf " stats in the header and allow the weekly stats\\n"
+		printf " report to be run.\\n"
+		printf " Logging can be enabled or disabled anytime.\\n"
+		while true;do
+			printf "\\n Enable logging now? [1=Yes 2=No] ";read -r logg
+			case "$logg" in
+				1)	logging=on;break;;
+				2)	logging=off;break;;
+				*) 	printf "\\n input is not an option\\n";;
+			esac
+		done
+	fi
+
+	if [ "$action" = "install" ]; then
+		print_red_line
+		printf "${INFO} Supporting SmallNetBuilder.com\\n\\n"
+		printf " To support SmallNetBuilder.com, some domains are\\n"
+		printf " whitelisted through the hard-coded whitelist to\\n"
+		printf " allow ads on their websites to be shown.\\n"
+		press_enter_to "acknowledge"
+	fi
+}
+
+check_entware(){
+	echo "${INFO} Probing for Entware"
+	if [ -f /opt/bin/opkg ]; then
+		echo "${OK} Entware is already installed"
+
+		# Removing http://pkg.entware-backports.tk reference if found on MIPS routers
+		if [ "$(uname -m)" = mips ] && grep -q 'entware-backports\.tk' /opt/etc/opkg.conf; then
+			printf "${INFO} Removing obsolete entware-backports.tk reference in /opt/etc/opkg.conf\\n"
+			sed -i /entware-backports.tk/d /opt/etc/opkg.conf
+		fi
+
+		check_entware_packages
+		check_entware_folder
+		opkgPath="$(find /mnt/*/entware/bin/opkg)"
+		if [ -f "$opkgPath" ] 2> /dev/null; then
+			entPath="${opkgPath%/bin/opkg}"
+			ENTURL="$(awk 'NR == 1 {print $3}' /opt/etc/opkg.conf)"
+			[ "$(echo $ENTURL | grep 'aarch64\|armv7\|mipsel')" ] && entVersion="Entware (${ENTURL##*/})"
+			[ -z "$entVersion" ] && entVersion=$entVer
+		fi
+		minsize=$((minsize - 30000))
+		maxsize=$((maxsize - 30000))
+		check_device_free "$(dirname "$entPath")"
+		entpreinstalled=1
+		if [ "$action" = "install" ]; then
+			print_red_line
+			printf "${OK} $NAME is now ready to install,\\n"
+			printf "${SPACE} this process runs fully automatic.\\n"
+			press_enter_to "continue"
+		fi
+
+	else
+		echo "${INFO} Entware not installed, running checks"
+
+		if [ -L "/tmp/opt" ]; then
+			# dl master check
+			if [ "$(nvram get apps_mounted_path)" ] && [ -d "$(nvram get apps_mounted_path)/$(nvram get apps_install_folder)" ]; then
+				if [ -f "/opt/etc/init.d/S50downloadmaster" ]; then
+					echo "${NOK} Download Master appears to be installed at"
+					echo "${SPACE} $(nvram get apps_mounted_path)/$(nvram get apps_install_folder)"
+					echo "${SPACE} Entware and Download Master cannot be installed at the same time."
+					echo "${SPACE} Uninstall Download Master in 'USB Application' first."
+
+					rm -rf /tmp/diversion
+					echo
+					printf "${NOK} Correct above error first before installing\\n${SPACE} $NAME\\n"
+					press_enter_to "return to menu"
+					lastError=" Correct error first before installing\\n $NAME"
+					reload_d_menu
+
+				else
+					echo "${NOK} Correcting invalid Entware or Download Master settings"
+					if [ -L "/tmp/opt" ]; then
+						rm -f /tmp/opt 2> /dev/null
+						rm -f /opt 2> /dev/null
+					fi
+					if [ -d "$(nvram get apps_mounted_path)/$(nvram get apps_install_folder)" ]; then
+						rm -rf "$(nvram get apps_mounted_path)/$(nvram get apps_install_folder)"
+					fi
+					nvram set apps_mounted_path=
+					nvram set apps_dev=
+					nvram set apps_state_autorun=
+					nvram set apps_state_enable=
+					nvram set apps_state_install=
+					nvram set apps_state_switch=
+					nvram commit
+
+				fi
+			else
+				if [ -L "/tmp/opt" ]; then
+					rm -f /tmp/opt 2> /dev/null
+					rm -f /opt 2> /dev/null
+				fi
+				echo "${ATTN} Corrected invalid Entware symlink"
+			fi
+
+		fi
+
+		echo "${OK} Entware checks passed"
+
+		print_red_line
+		echo "${QUESTION} Select device to install Entware to"
+		echo
+
+		i=1;noad=
+		for mounted in $(/bin/mount | grep -E "$PART_TYPES" | cut -d" " -f3); do
+			echo " $i. ${GREEN}$mounted${NC}"
+			eval mounts$i="$mounted"
+			noad="${noad}${i} "
+			i=$((i+1))
+		done
+
+		if [ "$i" = "1" ]; then
+			lastError=" No compatible device(s) found to install\\n $NAME on. A device formatted with one of\\n these file systems is required:\\n $(echo $PART_TYPES | sed -e 's/|/, /g')"
+			reload_d_menu
+		fi
+
+		[ "$i" = "2" ] && devNo=1-1 || devNo="1-$((i-1))"
+		while true;do
+			printf "\\n Select device [$devNo] ";read -r device
+			case "$device" in
+				[$noad])	break;;
+				*)			printf "\\n input is not an option\\n";;
+			esac
+		done
+
+		eval entDev="\$mounts$device"
+
+		echo
+		echo "${INFO} Running device checks"
+
+		check_device "$entDev"
+
+		check_device_free "$entDev"
+
+		echo "${OK} Device checks passed"
+
+		if [ "$(uname -m)" = "aarch64" ]; then
+			print_red_line
+			printf "${QUESTION} Select Entware version\\n\\n"
+			printf " This router can run 32bit or 64bit Entware.\\n\\n"
+			printf " 1. install 64-bit Entware (recommended)\\n"
+			printf " 2. install 32-bit Entware\\n"
+			while true;do
+				printf "\\n Enter your selection [1-2] ";read -r eversion
+				case "$eversion" in
+					1)	INST_URL='http://bin.entware.net/aarch64-k3.10/installer/generic.sh'
+						entVer="Entware (aarch64)";break;;
+					2)	INST_URL='http://bin.entware.net/armv7sf-k3.2/installer/generic.sh'
+						entVer="Entware (armv7)";break;;
+					*) 	printf "\\n input is not an option\\n";;
+				esac
+			done
+		fi
+
+		print_red_line
+		printf "${OK} $NAME is now ready to install,\\n"
+		printf "${SPACE} this process runs fully automatic.\\n"
+		press_enter_to "continue"
+
+		cd /tmp
+		entPath="$entDev/entware"
+		[ -d "$entPath" ] && rm -rf "$entPath"
+
+		echo "${INFO} Creating Entware install directory $entPath"
+
+		mkdir -p "$entPath"
+
+		ln -sf "$entPath" /tmp/opt
+
+		echo "${INFO} Installing $entVer, using external script"
+		echo "${GRAY}"
+		wget --timeout=10 --tries=3 --retry-connrefused -qO - "$INST_URL" | sh
+		echo "${NC}"
+
+		if [ -f /opt/bin/opkg ]; then
+			ENTURL="$(awk 'NR == 1 {print $3}' /opt/etc/opkg.conf)"
+			[ "$(echo $ENTURL | grep 'aarch64\|armv7\|mipsel')" ] && entVersion="Entware (${ENTURL##*/})"
+			[ -z "$entVersion" ] && entVersion=$entVer
+			echo "${OK} $entVersion install complete"
+			check_entware_packages
+			check_entware_folder
+			cd
+		else
+			echo "${NOK} $entVer install failed"
+			cd
+			press_enter_to acknowledge
+			lastError=" $entVer install failed.\\n Check error output."
+			reload_d_menu
+		fi
+
+	fi
+}
+
+check_entware_folder(){
+	if [ "$(/opt/bin/find /tmp/mnt/*/ -maxdepth 1 -type d -name "entware*" 2>/dev/null | wc -l)" -gt "1" ]; then
+		/opt/bin/find /tmp/mnt/*/ -maxdepth 1 -type d -name "entware*" | while read fdir; do
+			if [ "$fdir" != "$(readlink /tmp/opt)" ] && [ -f "$fdir/bin/opkg" ]; then
+				mv "$fdir" "$(dirname "$fdir")/old.$(basename "$fdir")"
+			fi
+		done
+	fi
+}
+
+check_entware_packages(){
+	opkg update >/dev/null
+	if [ ! -f "/opt/bin/grep" ]; then
+		echo "${INFO} Installing required $entVersion package: grep"
+		echo "${GRAY}"
+		opkg install grep
+		echo "${NC}"
+	fi
+	if [ ! -f "/opt/bin/find" ]; then
+		echo "${INFO} Installing required $entVersion package: findutils"
+		echo "${GRAY}"
+		opkg install findutils
+		echo "${NC}"
+	fi
+	if [ ! -f "/opt/bin/column" ]; then
+		echo "${INFO} Installing required $entVersion package: column"
+		echo "${GRAY}"
+		opkg install column
+		echo "${NC}"
+	fi
+	if [ "$buCompression" ] && [ "$buCompression" = zip ] && [ ! -f "/opt/bin/zip" ]; then
+		echo "${INFO} Installing required $entVersion package: zip"
+		echo "${GRAY}"
+		opkg install zip
+		echo "${NC}"
+	fi
+}
+
+check_device(){
+	check_device_nok(){
+	echo "${NOK} $1 has not passed the device test.${NC}"
+	echo "${SPACE} Check if device is read and writable"
+	rm -rf $1/rw_test
+	press_enter_to acknowledge
+	lastError=" $1 has not passed the device test."
+	reload_d_menu
+	}
+
+	mkdir -p $1/rw_test
+	if [ -d "$1/rw_test" ]; then
+		echo "rwTest=OK" >$1/rw_test/rw_test.txt
+		if [ -f "$1/rw_test/rw_test.txt" ]; then
+			. $1/rw_test/rw_test.txt
+			if [ "$rwTest" = "OK" ]; then
+				rm -rf $1/rw_test
+			else
+				check_device_nok
+			fi
+		else
+			check_device_nok
+		fi
+	else
+		check_device_nok
+	fi
+}
+
+check_device_free(){
+	free="$(df $1 | xargs | awk '{print $11}')"
+	if [ "$free" -le "$minsize" ]; then
+		echo "${NOK} Not enough free space available on"
+		echo "${SPACE} $1"
+		echo
+		echo "${SPACE} Required for $NAME $EDITION: $(( ${minsize} / 1024)) - $(( ${maxsize} / 1024)) MB"
+		echo "${SPACE} Free space on $1: $(( ${free} / 1024)) MB"
+		echo
+		press_enter_to aknowledge
+		lastError=" Not enough free space available on\\n $1."
+		reload_d_menu
+
+	elif [ "$free" -gt "$minsize" ] && [ "$free" -le "$maxsize" ]; then
+		echo "${ATTN} Device $1"
+		echo "${SPACE} has low free space available."
+		echo
+		echo "${SPACE} Required for $NAME $EDITION: $(( ${minsize} / 1024)) - $(( ${maxsize} / 1024)) MB"
+		echo "${SPACE} Free space on $1: $(( ${free} / 1024)) MB"
+		echo
+		echo "${SPACE} $NAME will work if the free space is"
+		echo "${SPACE} close to $(( ${maxsize} / 1024)) MB, but might not if it is"
+		echo "${SPACE} closer to $(( ${minsize} / 1024)) MB."
+		echo
+		press_enter_to aknowledge
+	fi
+}
+
+stop_old_version(){
+	echo
+	echo "${INFO} Stopping AB-Solution $oldversion"
+	cru d AB_UpdateHosts
+	cru d AB_RotateLogs
+	cru d AB_WeeklyStats
+	cru d AB_AutoBackup
+	cru d AB_ABupdateNotify
+	echo "${OK} Old cron jobs deleted"
+
+	if [ "$psState" = "on" ]; then
+		echo
+		/opt/etc/init.d/S80pixelserv-tls stop $0
+		ifconfig br0:pixelserv $psIPv4 down
+		echo
+		echo "${OK} pixelserv-tls stopped"
+	fi
+
+	[ -f "/root/.ash_history" ] && rm -f /root/.ash_history
+	[ -f "/jffs/.ash_history" ] && sed -i '/ab-solution/d' /jffs/.ash_history
+	[ -f "/root/ab-solution.sh" ] && rm /root/ab-solution.sh
+	[ -f "/opt/bin/ab-solution" ] && rm /opt/bin/ab-solution
+	[ -f "$portversion/ab-solution.sh" ] && rm "$portversion/ab-solution.sh"
+	[ -f "/opt/etc/absolution.sig" ] && rm -f /opt/etc/absolution.sig
+}
+
+check_old_jffs(){
+	mkdir -p "$entDev/old-jffs_scripts"
+
+	if [ -f "/jffs/scripts/dnsmasq.postconf" ] && grep -q '# DO NOT EDIT' /jffs/scripts/dnsmasq.postconf; then
+		cp /jffs/scripts/dnsmasq.postconf "$entDev/old-jffs_scripts/dnsmasq.postconf"
+		sed -i '/# DO NOT/,/NOT EDIT #/d' /jffs/scripts/dnsmasq.postconf
+	fi
+
+	if [ -f "/jffs/scripts/services-start" ] && grep -q '# DO NOT EDIT' /jffs/scripts/services-start; then
+		cp /jffs/scripts/services-start "$entDev/old-jffs_scripts/services-start"
+		sed -i '/# DO NOT/,/NOT EDIT #/d' /jffs/scripts/services-start
+	fi
+
+	if [ -f "/jffs/scripts/services-stop" ] && grep -q '# DO NOT EDIT' /jffs/scripts/services-stop; then
+		cp /jffs/scripts/services-stop "$entDev/old-jffs_scripts/services-stop"
+		sed -i '/# DO NOT/,/NOT EDIT #/d' /jffs/scripts/services-stop
+	fi
+
+	if [ -f "/jffs/scripts/update-notification" ] && grep -q "generated by AB-Solution" /jffs/scripts/update-notification; then
+		rm -f /jffs/scripts/update-notification
+		fwUpdate=on
+	fi
+
+	if [ -f "/jffs/scripts/wan-start" ] && grep -q '# DO NOT EDIT' /jffs/scripts/wan-start; then
+		cp /jffs/scripts/wan-start "$entDev/old-jffs_scripts/wan-start"
+		sed -i '/# DO NOT/,/NOT EDIT #/d' /jffs/scripts/wan-start
+	fi
+
+	if [ -f "/jffs/scripts/post-mount" ] && grep -q '# DO NOT EDIT' /jffs/scripts/post-mount; then
+		cp /jffs/scripts/post-mount "$entDev/old-jffs_scripts/post-mount"
+		sed -i '/# DO NOT/,/NOT EDIT #/d' /jffs/scripts/post-mount
+	fi
+
+	if [ -f "/jffs/scripts/post-mount" ] && grep -q '\$1/entware.* /tmp/opt\|generated by AB-Solution' /jffs/scripts/post-mount; then
+		[ -f "$entDev/old-jffs_scripts/post-mount" ] && rm -f /jffs/scripts/post-mount || mv /jffs/scripts/post-mount "$entDev/old-jffs_scripts/post-mount"
+		echo "#!/bin/sh" >/jffs/scripts/post-mount
+		if grep -q "swapon " "$entDev/old-jffs_scripts/post-mount"; then
+			grep "swapon " "$entDev/old-jffs_scripts/post-mount" >>/jffs/scripts/post-mount
+			sed -i "s/AB-Solution/$NAME/" /jffs/scripts/post-mount
+		fi
+		chmod 0755 /jffs/scripts/post-mount
+	fi
+
+	[ -z "$entpreinstalled" ] && echo "${OK} Old start scripts cleaned"
+}
+
+port_old_version(){
+	echo
+	echo "${INFO} Porting AB-Solution $oldversion files and settings"
+	get_file functions.div include >/dev/null
+	cp "$portversion/adblocking/whitelist.txt" "${DIVERSION_DIR}/list/whitelist"
+	cp "$portversion/adblocking/blacklist.txt" "${DIVERSION_DIR}/list/blacklist"
+	todayHour=$(date +"%F_%H.%M")
+	sort_list sort whitelist
+	sort_list sort blacklist
+	rm -f "${DIVERSION_DIR}/backup"/*whitelist "${DIVERSION_DIR}/backup"/*blacklist
+	echo "${OK} White and blacklist ported"
+
+	if [ -s /jffs/shared-AB-whitelist ]; then
+		mv /jffs/shared-AB-whitelist /jffs/addons/shared-whitelists/shared-Diversion-whitelist
+		echo "${OK} Shared whitelist ported"
+	fi
+
+	if [ -s "$portversion/adblocking/blocking_file" ]; then
+		cp "$portversion/adblocking/blocking_file" "${DIVERSION_DIR}/list/blockinglist"
+		echo "${OK} blocking list ported"
+	fi
+
+	if [ -s "$portversion/adblocking/.config/email.cfg" ]; then
+		cp "$portversion/adblocking/.config/email.cfg" "${DIVERSION_DIR}/.conf/email.conf"
+		echo "PROTOCOL=\"smtps\"" >>"${DIVERSION_DIR}/.conf/email.conf"
+		echo "SSL_FLAG=\"--insecure\"" >>"${DIVERSION_DIR}/.conf/email.conf"
+		echo "${OK} Email settings ported"
+	fi
+
+	if [ -s "$portversion/adblocking/.config/pixelserv-tls.switches" ]; then
+		cp "$portversion/adblocking/.config/pixelserv-tls.switches" "${DIVERSION_DIR}/.conf/pixelserv.switches"
+		echo "${OK} Pixelserv switches file ported"
+	fi
+
+	if [ -s "$portversion/adblocking/backup/ab_stats-iphostleases" ]; then
+		cp "$portversion/adblocking/backup/ab_stats-iphostleases" "${DIVERSION_DIR}/backup/diversion_stats-iphostleases"
+		echo "${OK} Client names backup file ported"
+	fi
+
+	if [ "$(ls -A $portversion/adblocking/stats)" ]; then
+		cp -a "$portversion/adblocking/stats/." "${DIVERSION_DIR}/stats/"
+		echo "${OK} Stats file(s) ported"
+	fi
+
+	if [ "$backupWhat" = "Custom" ]; then
+		if [ -s "$portversion/adblocking/custom_files/backup_exclude.txt" ] || [ -s "$portversion/adblocking/custom_files/custom_backup_settings.txt" ]; then
+			customFiles=1
+		fi
+	fi
+
+	if [ "$hostsFileType" = "Custom" ] || [ "$hostsFileType" = "Custom+" ] && [ -s "$portversion/adblocking/custom_files/custom_hosts_list.txt" ]; then
+		grep "^[^#]" "$portversion/adblocking/custom_files/custom_hosts_list.txt" > "${DIVERSION_DIR}/list/hostslist"
+		bfType=Custom
+		echo "${OK} Custom hosts list ported"
+	else
+		if [ "$addnHosts" = "on" ]; then
+			echo "$hosts_list" | sed '/emd.txt/d;/exp.txt/d;/hjk.txt/d;/mmt.txt/d;/psh.txt/d' > "${DIVERSION_DIR}/list/hostslist"
+		else
+			echo "$hosts_list" > "${DIVERSION_DIR}/list/hostslist"
+		fi
+		bfType=Custom
+		newbfType=1
+		echo "${OK} $(echo $hostsFileType | sed -e 's/+//') hosts list ported"
+	fi
+	if [ -s "${DIVERSION_DIR}/list/hostslist" ]; then
+		sed -i "s#http://someonewhocares.org#https://someonewhocares.org#" "${DIVERSION_DIR}/list/hostslist"
+	fi
+
+	echo "${OK} Blocking list settings ported"
+
+	bfUpdateLastRun=$hostsFileLastRun
+	bfUpdateDay=$hostsFileUpdateDay
+	bfUpdateDOW=$dayOfWeek
+	bfUpdateHour=$updateHour
+	adsNew=$newAds
+	echo "${OK} Ad-blocking stats ported"
+
+	if [ "$(ls -A $portversion/adblocking/logs)" ]; then
+		cp -a "$portversion/adblocking/logs/." /opt/var/log/
+		sed -i "s/ab-solution-ads-counter/diversion-ads-counter/" /opt/var/log/dnsmasq.log
+		echo "${OK} Dnsmasq log files ported"
+	fi
+
+	[ "$paginate" ] && editorPaginate=$paginate
+	[ "$fwNotification" = "on" ] && fwUpdate=on || fwUpdate=
+	[ "$abNotification" ] && divUpdate=on
+	[ "$shellState" ] && shHistory=$shellState
+
+	if [ "$weeklyStats" = "on" ]; then
+		wsTo=$sendStatsTo
+		wsAs=$(echo $statsParams | awk '{print $2}')
+		[ "$wsAs" = "att" ] && wsAs=attachment
+		wsDo=delete
+		wsTopHosts=$topHosts
+		wsTopClients=$topClients
+		wsFilterLN=$filterLocalNames
+	fi
+
+	if [ "$backupState" = "on" ]; then
+		backup=on
+		buFrequency=$backupFrequency
+		buType=$backupWhat
+		buAs=$backupHow
+		buCompression=$backupCompr
+	fi
+
+	[ "$dnsmasqSetting" = "on" ] && dsSetting=on
+	echo "${OK} Communication settings ported"
+	echo "${INFO} Porting of AB-Solution $oldversion complete"
+	echo
+	echo "${INFO} Installing $NAME $VERSION $EDITION"
+
+	rm -r "$portversion/adblocking"
+}
+
+make_directories(){
+	divdirs="${DIVERSION_DIR} ${DIVERSION_DIR}/.conf ${DIVERSION_DIR}/file ${DIVERSION_DIR}/backup ${DIVERSION_DIR}/custom ${DIVERSION_DIR}/list ${DIVERSION_DIR}/log ${DIVERSION_DIR}/stats /jffs/addons /jffs/addons/shared-whitelists /jffs/addons/diversion"
+	for dir in $divdirs; do
+		mkdir -p "$dir"
+		if [ ! -d "$dir" ]; then
+			lastError=" Directory $dir\\n is not present and could not be created.\\n Please investigate."
+			reload_d_menu
+		fi
+	done
+
+	if [ "$action" = "install" ] || [ "$action" = "port" ] || [ "$action" = "install-from-backup" ]; then
+		echo
+		echo "${OK} $NAME directory structure created"
+		echo "${SPACE} at ${GREEN_BG} ${DIVERSION_DIR} ${NC}"
+	fi
+
+	if [ "$action" = "install-from-backup" ]; then
+		echo
+		echo "${INFO} Extracting $NAME files from /jffs backup"
+		echo "${SPACE} to ${GREEN_BG} ${DIVERSION_DIR} ${NC}"
+		echo "${GRAY}"
+		tar xvzf "$localDivBackup" -C /
+		echo "${NC}"
+		[ -f "${DIVERSION_DIR}/.conf/email.conf.txt" ] && mv "${DIVERSION_DIR}/.conf/email.conf.txt" "${DIVERSION_DIR}/.conf/email.conf"
+	fi
+
+	if [ "$action" = "restore" ] || [ "$action" = "install-from-backup" ] && [ "$EN" -eq "1" ]; then
+		[ -d /opt/var/cache/pixelserv ] && rm -rf /opt/var/cache/pixelserv
+	fi
+
+	if [ "$action" = "port" ]; then
+		stop_old_version
+		check_old_jffs
+		restart_DNSMASQ
+		echo "${INFO} AB-Solution $oldversion stopped"
+		port_old_version
+	fi
+
+	[ "$action" = "re-install" ] || [ "$action" = "restore" ] || [ "$action" = "install-from-backup" ] && fa=check || fa=new
+	get_latest_files "$fa"
+	fa=
+}
+
+write_b_w_list(){
+	echo
+	echo "${INFO} Checking white and blacklists"
+
+	if [ ! -f "${DIVERSION_DIR}/list/whitelist" ]; then
+		cat <<-EOF > "${DIVERSION_DIR}/list/whitelist"
+
+		EOF
+		echo "${OK} Whitelist created"
+	else
+		trim_file "${DIVERSION_DIR}/list/whitelist"
+		echo "${OK} Whitelist"
+	fi
+
+	if [ ! -f "${DIVERSION_DIR}/list/blacklist" ]; then
+		cat <<-EOF > "${DIVERSION_DIR}/list/blacklist"
+
+		EOF
+		echo "${OK} Blacklist created"
+	else
+		trim_file "${DIVERSION_DIR}/list/blacklist"
+		echo "${OK} Blacklist"
+	fi
+
+	if [ ! -f "${DIVERSION_DIR}/list/wc_blacklist" ]; then
+		cat <<-EOF > "${DIVERSION_DIR}/list/wc_blacklist"
+
+		EOF
+		echo "${OK} Wildcard blacklist created"
+	else
+		trim_file "${DIVERSION_DIR}/list/wc_blacklist"
+		echo "${OK} Wildcard blacklist"
+	fi
+}
+
+check_pixelserv(){
+	echo
+	echo "${INFO} Probing for pixelserv-tls"
+
+	if [ "$(opkg list-installed | grep pixelserv-tls)" ]; then
+		echo "${OK} pixelserv-tls is already installed"
+	else
+		echo "${INFO} Installing Entware package 'pixelserv-tls'"
+		echo "${GRAY}"
+		opkg update >/dev/null
+		opkg install pixelserv-tls
+		echo "${NC}"
+		if [ "$(opkg list-installed | grep pixelserv-tls)" ]; then
+			cp -f "${DIVERSION_DIR}/file/S80pixelserv-tls" /opt/etc/init.d/S80pixelserv-tls
+			[ "$LANblockingIP" ] && [ "$LANblockingIP" = off ] && psState=on
+			echo "${OK} pixelserv-tls installed"
+		else
+			lastError=" pixelserv-tls install failed."
+			reload_d_menu
+		fi
+	fi
+
+	if [ -f /opt/var/cache/pixelserv/ca.crt ] && [ -f /opt/var/cache/pixelserv/ca.key ]; then
+		echo "${OK} pixelserv-tls CA certificate found"
+	else
+		echo
+		echo "${INFO} Creating pixelserv-tls CA certificate"
+
+		if [ -f /tmp/etc/openssl.cnf ]; then
+			cp /tmp/etc/openssl.cnf /tmp/diversion/div-openssl.cnf
+			sed -i "/\[ v3_ca \]/aextendedKeyUsage = serverAuth" /tmp/diversion/div-openssl.cnf
+			sed -i 's/^default_bits.*/default_bits		= 2048/' /tmp/diversion/div-openssl.cnf
+		else
+			get_file div-openssl.cnf new /tmp/diversion >/dev/null
+		fi
+
+		echo "${GRAY}"
+
+		cd /opt/var/cache/pixelserv
+		/usr/sbin/openssl genrsa -out ca.key 2048
+		/usr/sbin/openssl req -key ca.key -new -x509 -days 3650 -sha256 -extensions v3_ca -out ca.crt -subj "/CN=Pixelserv CA" -config /tmp/diversion/div-openssl.cnf
+		cd
+		echo "${NC}"
+		[ -d /opt/var/cache/pixelserv ] && chown -R nobody /opt/var/cache/pixelserv
+		if [ -f /opt/var/cache/pixelserv/ca.crt ] && [ -f /opt/var/cache/pixelserv/ca.key ]; then
+			echo "${OK} pixelserv-tls CA certificate created"
+		else
+			lastError=" pixelserv-tls CA certificate creation failed."
+			reload_d_menu
+		fi
+	fi
+}
+
+set_defaults(){
+	DIVERSION_STATUS=enabled
+	UNMOUNT_STATUS=
+
+	if [ -z "$EN" ] || [ -z "$EDITION" ]; then
+		if [ "$(opkg list-installed | grep pixelserv-tls)" ]; then
+			EDITION=Standard
+			EN=2
+		else
+			EDITION=Lite
+			EN=1
+		fi
+	fi
+
+	if [ "$action" = "upgrade" ] || [ "$action" = "install" ] && [ "$EN" -ge "2" ]; then
+		[ "$LANblockingIP" ] && [ "$LANblockingIP" = on ] && LANblockingIP=off
+		[ "$psIP" ] && blockingIP=$psIP
+		[ -z "$psState" ] && psState=on
+	fi
+
+	if [ "$action" = restore ] || [ "$action" = install-from-backup ]; then
+		if [ "$LANblockingIP" ] && [ "$LANblockingIP" = on ]; then
+			[ "$lanBIP" ] && blockingIP=$lanBIP
+		fi
+	fi
+
+	if [ "$action" = "port" ] || [ -z "$bfType" ]; then
+		[ -z "$bfType" ] && bfType=Standard
+		. "${DIVERSION_DIR}/file/functions.div"
+		write_bf
+	fi
+
+	[ "$action" = "port" ] && action=install
+	[ "$THEME" = "local" ] && THEME=standard
+
+	[ -z "$logging" ] && logging=on
+	[ -z "$adsCounter" ] && adsCounter=off
+	[ -z "$shHistory" ] && shHistory=on
+	[ -z "$adblocking" ] && adblocking=on
+	[ -z "$blockingIP" ] && blockingIP=0.0.0.0
+	[ -z "$bfUpdateLastRun" ] && bfUpdateLastRun="$(date +"%b %d %T")"
+	[ -z "$bfUpdateDay" ] && bfUpdateDay=$(date +"%A")
+	[ -z "$bfUpdateDOW" ] && bfUpdateDOW=$(date +"%a")
+	[ -z "$bfUpdateHour" ] && bfUpdateHour=2
+	[ -z "$adsBlocked" ] && adsBlocked=0
+	[ -z "$adsWeek" ] && adsWeek=0
+	[ -z "$adsNew" ] && adsNew=0
+	write_conf_file
+}
+
+write_jffsfile(){
+	echo
+	[ -z "$entDev" ] && entDev=$(dirname "$entPath")
+
+	if [ "$entpreinstalled" ]; then
+		check_old_jffs
+		entpreinstalled=
+	fi
+
+	check_nl(){ [ -n "$(tail -c1 "$1")" ] && echo >> "$1";}
+
+	echo "${INFO} Checking /jffs/scripts entries"
+
+	if [ ! -f "/jffs/scripts/dnsmasq.postconf" ]; then
+		echo "#!/bin/sh" >/jffs/scripts/dnsmasq.postconf
+	elif [ -f "/jffs/scripts/dnsmasq.postconf" ] && ! head -1 /jffs/scripts/dnsmasq.postconf | grep -qE "^#!/bin/sh"; then
+		sed -i '1s~^~#!/bin/sh\n~' /jffs/scripts/dnsmasq.postconf
+	fi
+	if ! grep -q "^. ${DIVERSION_DIR}/file/post-conf.div" /jffs/scripts/dnsmasq.postconf; then
+		sed -i '/post-conf.div/d' /jffs/scripts/dnsmasq.postconf >/dev/null
+		check_nl /jffs/scripts/dnsmasq.postconf
+		echo ". ${DIVERSION_DIR}/file/post-conf.div # Added by $NAME" >>/jffs/scripts/dnsmasq.postconf
+		echo "${OK} dnsmasq.postconf entry added"
+	else
+		echo "${OK} dnsmasq.postconf"
+	fi
+
+	if [ ! -f "/jffs/scripts/post-mount" ]; then
+		echo "#!/bin/sh" >/jffs/scripts/post-mount
+	elif [ -f "/jffs/scripts/post-mount" ] && ! head -1 /jffs/scripts/post-mount | grep -qE "^#!/bin/sh"; then
+		sed -i '1s~^~#!/bin/sh\n~' /jffs/scripts/post-mount
+	fi
+	if ! grep -q "^. /jffs/addons/diversion/mount-entware.div" /jffs/scripts/post-mount; then
+		# post-mount.div clean up from older versions
+		sed -i '/post-mount.div/d' /jffs/scripts/post-mount >/dev/null
+		sed -i '/mount-entware.div/d' /jffs/scripts/post-mount >/dev/null
+		check_nl /jffs/scripts/post-mount
+		echo ". /jffs/addons/diversion/mount-entware.div # Added by $NAME" >>/jffs/scripts/post-mount
+		echo "${OK} mount-entware entry added"
+	else
+		echo "${OK} mount-entware"
+	fi
+
+	if [ -f "/jffs/scripts/services-start" ] && grep -q "rc.unslung" /jffs/scripts/services-start; then
+		mv /jffs/scripts/services-start /jffs/scripts/obsolete_services-start
+		check_nl /jffs/scripts/obsolete_services-start
+		echo "# This file was renamed by $NAME, it contains obsolete Entware entries" >>/jffs/scripts/obsolete_services-start
+	fi
+
+	if [ ! -f "/jffs/scripts/services-stop" ]; then
+		echo "#!/bin/sh" >/jffs/scripts/services-stop
+	elif [ -f "/jffs/scripts/services-stop" ] && ! head -1 /jffs/scripts/services-stop | grep -qE "^#!/bin/sh"; then
+		sed -i '1s~^~#!/bin/sh\n~' /jffs/scripts/services-stop
+	fi
+	if ! grep -q "^/opt/etc/init.d/rc.unslung stop" /jffs/scripts/services-stop; then
+		sed -i '/rc.unslung/d' /jffs/scripts/services-stop >/dev/null
+		check_nl /jffs/scripts/services-stop
+		echo "/opt/etc/init.d/rc.unslung stop # Added by $NAME" >>/jffs/scripts/services-stop
+		echo "${OK} services-stop entry added"
+	else
+		echo "${OK} services-stop"
+	fi
+
+	if [ ! -f "/jffs/scripts/unmount" ]; then
+		echo "#!/bin/sh" >/jffs/scripts/unmount
+	elif [ -f "/jffs/scripts/unmount" ] && ! head -1 /jffs/scripts/unmount | grep -qE "^#!/bin/sh"; then
+		sed -i '1s~^~#!/bin/sh\n~' /jffs/scripts/unmount
+	fi
+	if ! grep -q '^\[ \"\$(/usr/bin/find \$1/entware/bin/diversion' /jffs/scripts/unmount; then
+		sed -i '/diversion unmount/d' /jffs/scripts/unmount >/dev/null
+		trim_file /jffs/scripts/unmount
+		echo "[ \"\$(/usr/bin/find \$1/entware/bin/diversion 2> /dev/null)\" ] && diversion unmount # Added by $NAME" >>/jffs/scripts/unmount
+		echo "${OK} unmount entry added ($NAME)"
+	else
+		echo "${OK} unmount ($NAME)"
+	fi
+	if grep -q '^swapon.*\.' /jffs/scripts/post-mount; then
+		if [ "$swaplocation" ]; then
+			swapfile="$(basename $swaplocation)"
+		else
+			swapfile="$(basename $(grep -E "^swapon " /jffs/scripts/post-mount | awk '{print $2}'))"
+		fi
+		if ! grep -q "^\[ \"\$(/usr/bin/find \$1/$swapfile" /jffs/scripts/unmount; then
+			sed -i '/swapoff/d' /jffs/scripts/unmount >/dev/null
+			trim_file /jffs/scripts/unmount
+			echo "[ \"\$(/usr/bin/find \$1/$swapfile 2> /dev/null)\" ] && swapoff \$1/$swapfile # Added by $NAME" >> /jffs/scripts/unmount
+			echo "${OK} unmount entry added (swap file)"
+		else
+			echo "${OK} unmount (swap file)"
+		fi
+	fi
+}
+
+initialize_diversion(){
+	printf "\\n${INFO} Initializing $NAME\\n\\n"
+
+	BFinUse="${DIVERSION_DIR}/list/blockinglist"
+	if [ "$bfFs" = "on" ]; then
+		[ "$bfTypeinUse" = "secondary" ] && BFinUse="${DIVERSION_DIR}/list/blockinglist_fs"
+	fi
+
+	[ -z "$domainsPerLine" ] && npl=21 || npl=$((domainsPerLine+1))
+	if [ ! -f "$BFinUse" ] || [ "$(find $BFinUse -mtime +8)" ] || [ "$(awk ' NR==2' "$BFinUse" 2> /dev/null | wc -w)" != "$npl" ] || [ "$bfPlusHosts" ]; then
+		if [ -f "$BFinUse" ]; then
+			[ "$(find $BFinUse -mtime +8)" ] && echo "${ATTN} Blocking list older than 8 days, updating list"
+			[ -z "$domainsPerLine" ] && [ "$(awk ' NR==2' "$BFinUse" | wc -w)" != "$npl" ] && echo "${ATTN} New blocking list format starting with $NAME 4.1.0, updating list"
+			[ "$domainsPerLine" ] && [ "$(awk ' NR==2' "$BFinUse" | wc -w)" != "$npl" ] && echo "${ATTN} Blocking list domains per line not as per setting, updating list"
+			if [ "$bfPlusHosts" ]; then
+				echo "${ATTN} Blocking list Plus hosts feature discontinued, updating list"
+				[ -f "${DIVERSION_DIR}/list/plus-hostslist" ] && rm "${DIVERSION_DIR}/list/plus-hostslist"
+				if [ -f "${DIVERSION_DIR}/list/hostslist" ] && grep -rq 'hosts-file.net' "${DIVERSION_DIR}/list/hostslist"; then
+					sed -i "/hosts-file.net/d" "${DIVERSION_DIR}/list/hostslist"
+				fi
+				if [ -f "${DIVERSION_DIR}/list/hostslist_fs" ] && grep -rq 'hosts-file.net' "${DIVERSION_DIR}/list/hostslist_fs"; then
+					sed -i "/hosts-file.net/d" "${DIVERSION_DIR}/list/hostslist_fs"
+				fi
+			fi
+		fi
+		if [ "$(ps | grep -v grep | grep update-bl.div)" ]; then
+			printf "\\n${ERR} Blocking list update already runs in the\\n background.${SPACE} Please update list manually later.\\n\\n"
+		else
+			echo "${INFO} Running update-bl.div to create the blocking list"
+			echo "${GRAY}"
+			sh "${DIVERSION_DIR}/file/update-bl.div"
+			echo "${NC}"
+		fi
+		read_conf_file
+	else
+		trim_file "$BFinUse"
+		if ! head -1 "$BFinUse" | grep -wq "^$blockingIP"; then
+			convert_to_ip(){ sed -i "s/^[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/$1/g" "$2";}
+			convert_to_ip "$blockingIP" "$BFinUse"
+			convert_to_ip "$blockingIP" "${DIVERSION_DIR}/list/blacklist"
+		fi
+		read_conf_file
+		blockedDomains="$(($(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/blockinglist" | wc -w)-$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/blockinglist" | wc -l)))"
+		blockedDomains="$(($blockedDomains+$(/opt/bin/grep "^[^#]" "${DIVERSION_DIR}/list/blacklist" "${DIVERSION_DIR}/list/wc_blacklist" | wc -l)))"
+		write_conf_file
+		echo "${OK} blocking list"
+	fi
+
+	if [ ! -f "/opt/bin/$SELF" ]; then
+		mv -f "$(cd "$(dirname "$0")"; pwd -P)/$SELF" "/opt/bin/$SELF"
+	elif [ "$(cd "$(dirname "$0")"; pwd -P)/$SELF" != "/opt/bin/$SELF" ]; then
+		mv -f "$(cd "$(dirname "$0")"; pwd -P)/$SELF" "/opt/bin/$SELF"
+	fi
+
+	## Clean up from previous versions
+	[ -f "${DIVERSION_DIR}/file/update-bf.div" ] && rm "${DIVERSION_DIR}/file/update-bf.div"
+	[ -f "${DIVERSION_DIR}/file/theme.div" ] && rm "${DIVERSION_DIR}/file/theme.div"
+	[ -f "${DIVERSION_DIR}/log/Update-blocking-file.log" ] && rm "${DIVERSION_DIR}/log/Update-blocking-file.log"
+	cru d Diversion_UpdateBF
+	if [ -f "${DIVERSION_DIR}/.conf/email.conf" ] && grep -q 'PASSWORD=' "${DIVERSION_DIR}/.conf/email.conf"; then
+		if ! grep -q 'PUT YOUR PASSWORD HERE' "${DIVERSION_DIR}/.conf/email.conf"; then
+			. "${DIVERSION_DIR}/.conf/email.conf"
+			echo -n $PASSWORD | /usr/sbin/openssl aes-256-cbc -out "${DIVERSION_DIR}/.conf/emailpw.enc" -pass pass:ditbabot,isoi
+			sed -i 's/.*PASSWORD=.*/# Encrypted Password is stored in emailpw.enc file./' "${DIVERSION_DIR}/.conf/email.conf"
+			echo "${OK} Email password encrypted"
+		fi
+	fi
+	localDivBackup=$(find /jffs/${NAME}_*_local_backup*.tar.gz 2> /dev/null)
+	if [ "$localDivBackup" ]; then
+		mv -f $localDivBackup /jffs/addons/diversion
+	fi
+	[ -f /jffs/shared-Diversion-whitelist ] && mv /jffs/shared-Diversion-whitelist /jffs/addons/shared-whitelists/
+	[ -f /jffs/scripts/post-mount.div ] && rm /jffs/scripts/post-mount.div
+	[ -f "${DIVERSION_DIR}/file/post-mount.div" ] && rm "${DIVERSION_DIR}/file/post-mount.div"
+	[ -f "${DIVERSION_DIR}/list/plus-hostslist" ] && rm "${DIVERSION_DIR}/list/plus-hostslist"
+	rm -f /opt/share/diversion/AddPlusHosts*
+	if [ -f "${DIVERSION_DIR}/list/hostslist" ] && grep -rq 'hosts-file.net' "${DIVERSION_DIR}/list/hostslist"; then
+		sed -i "/hosts-file.net/d" "${DIVERSION_DIR}/list/hostslist"
+	fi
+	if [ -f "${DIVERSION_DIR}/list/hostslist_fs" ] && grep -rq 'hosts-file.net' "${DIVERSION_DIR}/list/hostslist_fs"; then
+		sed -i "/hosts-file.net/d" "${DIVERSION_DIR}/list/hostslist_fs"
+	fi
+	## End clean up
+
+	set_file_permissions
+
+	echo
+	echo "${INFO} Restarting Dnsmasq"
+	restart_DNSMASQ
+	sleep 2
+
+	i=20
+	while true; do
+		if [ "$(pidof dnsmasq)" ]; then
+			echo "${OK} Dnsmasq restarted"
+			echo
+			echo "${INFO} Checking dnsmasq.conf entries"
+			if [ "$adblocking" = "on" ]; then
+				i=20
+				while true; do
+					if grep -q "blockinglist.*" /etc/dnsmasq.conf; then
+						echo "${OK} Additional hosts"
+						break
+					else
+						i=$((i-1))
+						if [ "$i" -lt "1" ]; then
+							echo "${NOK} blockinglist entry timed out"
+							break
+						else
+							echo "${INFO} Waiting for blockinglist entry..."
+							sleep 2
+						fi
+					fi
+				done
+			fi
+			if [ "$logging" = "on" ]; then
+				i=20
+				while true; do
+					if grep -q "log-facility=" /etc/dnsmasq.conf; then
+						echo "${OK} Log facility"
+						break
+					else
+						i=$((i-1))
+						if [ "$i" -lt "1" ]; then
+							echo "${NOK} log-facility entry timed out"
+							break
+						else
+							echo "${INFO} Waiting for log-facility entry..."
+							sleep 2
+						fi
+					fi
+				done
+			fi
+			break
+		else
+			i=$((i-1))
+			if [ "$i" -lt "1" ]; then
+				echo "${NOK} Dnsmasq restart timed out"
+				break
+			else
+				echo "${INFO} Waiting for Dnsmasq to restart..."
+				sleep 2
+			fi
+		fi
+	done
+
+	if [ "$EN" -ge "2" ] && [ "$psState" = "on" ]; then
+		echo
+		echo "${INFO} (Re)starting pixelserv-tls"
+		on_off_pixelserv on restart
+		sleep 2
+
+		if [ "$(pidof pixelserv-tls)" ]; then
+			echo "${OK} pixelserv-tls is running"
+		else
+			echo
+			echo "${NOK} pixelserv-tls not running, restarting..."
+			on_off_pixelserv on restart
+			sleep 2
+			if [ "$(pidof pixelserv-tls)" ]; then
+				echo "${OK} pixelserv-tls is running"
+			else
+				echo
+				echo "${NOK} pixelserv-tls not running, check Syslog for errors"
+				press_enter_to acknowledge
+			fi
+		fi
+	fi
+
+	echo
+	echo "${INFO} Checking cron jobs"
+
+	cronFile="/var/spool/cron/crontabs/$(nvram get http_username)"
+	i=10
+	while true; do
+		if [ -f "$cronFile" ]; then
+			echo "${OK} cron file found"
+
+			if [ "$adblocking" = "on" ]; then
+				if grep -wq "Diversion_UpdateBL" "$cronFile"; then
+					echo "${OK} blocking list update"
+				else
+					echo "${NOK} blocking list update"
+				fi
+			fi
+			if [ "$logging" = "on" ]; then
+				if grep -wq "Diversion_RotateLogs" "$cronFile"; then
+					echo "${OK} Rotate logs"
+				else
+					echo "${NOK} Rotate logs"
+				fi
+				if grep -wq "Diversion_CountAds" "$cronFile"; then
+					echo "${OK} Ads counter"
+				else
+					echo "${NOK} Ads counter"
+				fi
+				if [ "$weeklyStats" = "on" ]; then
+					if grep -wq "Diversion_WeeklyStats" "$cronFile"; then
+						echo "${OK} Weekly stats"
+					else
+						echo "${NOK} Weekly stats"
+					fi
+				fi
+			fi
+
+			if [ "$backup" = "on" ]; then
+				if grep -wq "Diversion_AutoBackup" "$cronFile"; then
+					echo "${OK} Backup"
+				else
+					echo "${NOK} Backup"
+				fi
+			fi
+			if [ "$divUpdate" = "on" ]; then
+				if grep -wq "Diversion_UpdateCheck" "$cronFile"; then
+					echo "${OK} $NAME update check"
+				else
+					echo "${NOK} $NAME update check"
+				fi
+			fi
+
+			break
+		else
+			i=$((i-1))
+			if [ "$i" -lt "1" ]; then
+				echo "${NOK} Unable to check cron jobs"
+				break
+			else
+				echo "${INFO} Waiting for cron jobs to register..."
+				sleep 2
+			fi
+		fi
+	done
+
+	lastAction=" $NAME $EDITION v$VERSION $action"
+
+	printf "\\n${OK}$lastAction complete\\n"
+
+	lastAction="${lastAction}.\\n The $action log can be viewed in ${NC}${RED_BG} sf ${NC}"
+
+	if [ -f "${DIVERSION_DIR}/.conf/email.conf" ] && grep -q 'PUT YOUR PASSWORD HERE' "${DIVERSION_DIR}/.conf/email.conf"; then
+		lastAction="${lastAction}\\n\\n Set your email password in ${NC}${RED_BG} c ${NC},\\n it has been redacted for security reasons."
+	fi
+
+	if [ -f "${DIVERSION_DIR}/list/hostslist" ] && grep -q 'http://support.it-mate.co.uk/downloads/hosts.txt' "${DIVERSION_DIR}/list/hostslist"; then
+		itmate=1
+	fi
+	if [ -f "${DIVERSION_DIR}/list/hostslist_fs" ] && grep -q 'http://support.it-mate.co.uk/downloads/hosts.txt' "${DIVERSION_DIR}/list/hostslist_fs"; then
+		itmate=1
+	fi
+	[ "$itmate" ] && lastAction="${lastAction}\\n\\n The support.it-mate.co.uk hosts file no longer\\n exists. Use ${NC}${RED_BG} b ${NC}, 1 to replace it."
+	itmate=
+
+	[ "$action" = "install" ] && lastAction="${lastAction}\\n\\n Start command for $NAME is ${NC}${GREEN_BG} $SELF ${NC}"
+	[ "$action" = "install" ] || [ "$action" = "upgrade" ]  && [ "$EN" -ge "2" ] && lastAction="${lastAction}\\n\\n Remember to import the pixelserv-tls\\n certificate into browsers and devices.\\n Open ${GREEN}$psIP/ca.crt${NC} in a browser."
+
+	read_conf_file
+	write_message
+	[ "$action" = "install-from-backup" ] || [ "$action" = "restore" ] && echo "action=$action" >/tmp/diversion/action
+	action=
+	thisVERSION=$VERSION
+	write_conf_file
+
+	if [ -d "$entDev/old-jffs_scripts" ] && [ -z "$(ls -A $entDev/old-jffs_scripts)" ]; then
+		rm -rf "$entDev/old-jffs_scripts"
+	fi
+
+	if [ "$portversion" ]; then
+		[ -d "$entDev/old-jffs_scripts" ] || [ "$customFiles" = "1" ] || [ "$newbfType" = "1" ] && print_red_line
+
+		if [ -d "$entDev/old-jffs_scripts" ]; then
+			echo "${ATTN} Old /jffs/scripts/ files were moved to"
+			echo "${SPACE} $entDev/old-jffs_scripts/"
+			echo "${SPACE} during the porting."
+			echo
+			echo "${INFO} Commonly used script entries such as"
+			echo "${SPACE} from Skynet, dnscrypt and swap file"
+			echo "${SPACE} were preserved during this process."
+		fi
+
+		if [ "$customFiles" = "1" ]; then
+			echo
+			echo "${ATTN} Custom $NAME backup settings were found."
+			echo "${SPACE} These settings could not be ported."
+			echo "${SPACE} Configure the Custom backup settings"
+			echo "${SPACE} again in ${RED_BG} c ${NC} next."
+		fi
+
+		if [ "$newbfType" = "1" ]; then
+			echo
+			echo "${ATTN} blocking list type '$(echo $hostsFileType | sed -e 's/+//')' is"
+			echo "${SPACE} no longer available in $NAME."
+			echo "${SPACE} Your hosts list has been preserved"
+			echo "${SPACE} and the file type set as 'Custom'."
+		fi
+
+		[ -d "$entDev/old-jffs_scripts" ] || [ "$customFiles" = "1" ] || [ "$newbfType" = "1" ] && press_enter_to acknowledge
+	fi
+
+	if [ "$needsReboot" = "1" ]; then
+		print_red_line
+		echo "${INFO} Start command for $NAME is ${GREEN_BG} $SELF ${NC}"
+		echo
+		echo "${ATTN} This router is rebooting in 15 seconds"
+		echo "${SPACE} as acknowledged earlier."
+		press_enter_to continue
+		cat <<-EOF > "/tmp/diversion-reboot"
+				#!/bin/sh
+				sleep 15
+				service reboot
+				EOF
+		sh /tmp/diversion-reboot >/dev/null &
+		clear
+	else
+		sleep 2
+	fi
+}
+#eof

@@ -1,0 +1,204 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+if [ -f /opt/share/diversion/.conf/email.conf ] && [ -f /opt/share/diversion/.conf/diversion.conf ]; then
+	. /opt/share/diversion/.conf/email.conf
+	. /opt/share/diversion/.conf/diversion.conf
+
+	[ -z "$(nvram get odmpid)" ] && routerModel=$(nvram get productid) || routerModel=$(nvram get odmpid)
+	[ -z "$FRIENDLY_ROUTER_NAME" ] && FRIENDLY_ROUTER_NAME=$routerModel
+
+	version_check(){ echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }';}
+	_curl(){ /usr/sbin/curl -s --connect-timeout 10 --retry 3 "$@";}
+	rm_temp_files(){ rm -f /tmp/diversion.info /tmp/divmail* /tmp/amtm-tpu-check;}
+
+	rm_temp_files
+
+	_curl "$INSTALL_URL/diversion.info" -o /tmp/diversion.info
+
+	if [ -f /tmp/diversion.info ] && grep -wq '^#bof' /tmp/diversion.info && grep -wq '^#eof' /tmp/diversion.info; then
+		. /tmp/diversion.info
+
+		[ "$S_M_VERSION" ] && SERVER_VERSION="${S_VERSION}.$S_M_VERSION" || SERVER_VERSION=$S_VERSION
+		if [ "$(version_check $SERVER_VERSION)" -gt "$(version_check $thisVERSION)" ]; then
+			divUpd=1
+		else
+			localmd5="$(md5sum "/opt/bin/diversion" | awk '{print $1}')"
+			remotemd5="$(curl -fsL --retry 3 "$INSTALL_URL/${S_VERSION:0:3}/diversion" | md5sum | awk '{print $1}')"
+			if [ "$localmd5" != "$remotemd5" ]; then
+				remoteReleased="$(curl -fsN --retry 3 "$INSTALL_URL/${S_VERSION:0:3}/diversion" | grep "^RELEASED=" | sed -e 's/RELEASED=//; s/"//g')"
+				divUpd=2
+			else
+				divUpd=0
+			fi
+		fi
+
+		amtm=0;aua=;autpu=;amtmUpd=0;startapp="<b>diversion</b>"
+		if [ -f /jffs/scripts/amtm ] || [ -f /jffs/addons/amtm/a_fw/amtm.mod ]; then
+			if [ -f /jffs/scripts/amtm ]; then
+				case "$INSTALL_URL" in
+					*.test*) 	remoteurl="http://diversion.test/amtm/amtm";;
+					*) 			remoteurl="https://diversion.ch/amtm/amtm";;
+				esac
+				lmd5file=/jffs/scripts/amtm
+				amtmFile=/jffs/scripts/amtm
+			else
+				case "$INSTALL_URL" in
+					*.test*) 	remoteurl="http://diversion.test/amtm_fw/amtm.mod";;
+					*) 			remoteurl="https://diversion.ch/amtm_fw/amtm.mod";;
+				esac
+				lmd5file=/jffs/addons/amtm/a_fw/amtm.mod
+				amtmFile=/usr/sbin/amtm
+			fi
+
+			amtm=1
+			startapp="<b>diversion</b> or <b>amtm</b>"
+			localver="$(grep "^version=" $lmd5file | sed -e 's/version=//')"
+
+			if curl -fsN --retry 3 "$remoteurl" | grep -qF "version="; then
+				remotever="$(curl -fsN --retry 3 "$remoteurl" | grep "^version=" | sed -e 's/version=//')"
+				remotemd5="$(curl -fsL --retry 3 "$remoteurl" | md5sum | awk '{print $1}')"
+				amtmRelease="$(curl -fsN --retry 3 "$remoteurl" | grep "^release=" | sed -e 's/release=//; s/"//g')"
+
+				localmd5="$(md5sum $lmd5file | awk '{print $1}')"
+				atpuc=0
+				# min tpu check version 2.6
+				if [ "$(version_check $(echo $localver | sed 's/[^0-9]*//g'))" -ge "$(version_check 26)" ]; then
+					atpuc=1
+					"$amtmFile" tpu
+					if [ -s /tmp/amtm-tpu-check ]; then
+						amtmtpu=$(cat /tmp/amtm-tpu-check)
+					fi
+				fi
+				if [ "$localver" != "$remotever" ]; then
+					amtmUpd=1
+				elif [ "$localmd5" != "$remotemd5" ]; then
+					amtmUpd=2
+				else
+					amtmUpd=0
+				fi
+			else
+				amtmUpd=3
+			fi
+		fi
+	else
+		logger -t Diversion "unable to send $NAME Update notification, received incomplete update info file from $(echo $INSTALL_URL | awk -F[/:] '{print $4}')"
+		rm_temp_files
+		exit 1
+	fi
+
+else
+	logger -t Diversion "unable to send Diversion Update notification, email.conf or diversion.conf not found"
+	exit 1
+fi
+
+# do not send mail if no updates unless test notification is sent
+if [ "$divUpd" -ge "1" ] || [ "$amtmUpd" -ge "1" ] || [ "$amtmtpu" ] || [ "$1" = "test" ]; then
+
+	# set From name
+	FROM_NAME="$NAME Update notification"
+
+	[ "$divUpd" = "0" ] && ua="$NAME no update"
+	[ "$divUpd" = "1" ] && ua="$NAME update"
+	[ "$divUpd" = "2" ] && ua="$NAME minor update"
+	if [ "$amtm" = "1" ]; then
+		[ "$amtmUpd" = "0" ] && aua=", amtm no update"
+		[ "$amtmUpd" = "1" ] && aua=", amtm update"
+		[ "$amtmUpd" = "2" ] && aua=", amtm minor update"
+		[ "$amtmUpd" = "3" ] && aua=", amtm (update error)"
+		[ "$amtmtpu" ] && autpu=", amtm third party update(s)" || autpu=
+	fi
+	echo MIME-Version: 1.0 > /tmp/divmail-body
+	echo Content-Type: text/html >> /tmp/divmail-body
+	echo "Subject: $FRIENDLY_ROUTER_NAME Router: $ua$aua$autpu available" >> /tmp/divmail-body
+	echo "From: \"$FROM_NAME\" <$FROM_ADDRESS>" >> /tmp/divmail-body
+	echo "Date: `date -R`" >> /tmp/divmail-body
+	echo "To: \"$TO_NAME\" <$TO_ADDRESS>" >> /tmp/divmail-body
+	echo "" >> /tmp/divmail-body
+	echo "<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">" >> /tmp/divmail-body
+	echo "<html>" >> /tmp/divmail-body
+	echo "<head>" >> /tmp/divmail-body
+	echo "<title></title><style></style>" >> /tmp/divmail-body
+	echo "</head>" >> /tmp/divmail-body
+	echo "<body>" >> /tmp/divmail-body
+	echo "<h2>Greetings from $NAME</h2>" >> /tmp/divmail-body
+
+	if [ "$divUpd" = "1" ]; then
+		echo "<p><b>An update is available for $NAME:</b><br>" >> /tmp/divmail-body
+		echo "Installed version: $thisVERSION<br><b>Available version: $SERVER_VERSION, released on $S_RELEASED</b><br></p>" >> /tmp/divmail-body
+	elif [ "$divUpd" = "2" ]; then
+		echo "<p><b>A minor update is available for $NAME:</b><br>" >> /tmp/divmail-body
+		echo "Installed version: $thisVERSION<br><b>Minor update, no version change. Released on $remoteReleased</b><br></p>" >> /tmp/divmail-body
+	else
+		echo "<p><b>No update available for $NAME.</b></p>" >> /tmp/divmail-body
+	fi
+	if [ "$amtm" = "1" ]; then
+		if [ "$amtmUpd" = "1" ]; then
+			echo "<p><b>An update is available for amtm:</b><br>" >> /tmp/divmail-body
+			echo "Installed version: $localver<br><b>Available version: $remotever, released on $amtmRelease</b><br>" >> /tmp/divmail-body
+		elif [ "$amtmUpd" = "2" ]; then
+			echo "<p><b>A minor update is available for amtm:</b><br>" >> /tmp/divmail-body
+			echo "Installed version: $localver<br><b>Minor update, no version change. Released on $amtmRelease</b><br>" >> /tmp/divmail-body
+		elif [ "$amtmUpd" = "3" ]; then
+			echo "<p><b>amtm update check failed because of server error</b>.<br>Try again later.<br>" >> /tmp/divmail-body
+		elif [ "$amtm" = "1" ]; then
+			echo "<p><b>No update available for amtm.</b><br>" >> /tmp/divmail-body
+		fi
+		if [ "$amtm" = "1" ] && [ "$atpuc" = "0" ]; then
+			echo "There may be third-party script updates available in amtm.<br>Enter <span style=\"background-color: #970808;color: #ffffff;\">&nbsp;<b>u</b>&nbsp;</span>&nbsp;in amtm to check.</p>" >> /tmp/divmail-body
+		elif [ "$atpuc" = "1" ] && [ "$amtmtpu" ]; then
+			echo "<p><b>Third-party script update(s) available in amtm:</b><br>" >> /tmp/divmail-body
+			echo "$amtmtpu" >> /tmp/divmail-body
+		elif [ "$atpuc" = "1" ] && [ -z "$amtmtpu" ]; then
+			echo "<p><b>No third party script update(s) available in amtm.</b><br>" >> /tmp/divmail-body
+		fi
+	fi
+
+	if [ "$divUpd" -ge "1" ] || [ "$amtmUpd" -ge "1" ]; then
+		echo "<p><b>How to update</b>" >> /tmp/divmail-body
+		echo "<br>Log into your $FRIENDLY_ROUTER_NAME Router over SSH on IP address $(nvram get lan_ipaddr).<br>" >> /tmp/divmail-body
+		echo "Start the user interface with $startapp and enter <span style=\"background-color: #970808;color: #ffffff;\">&nbsp;<b>u</b>&nbsp;</span>&nbsp;to update.</p>" >> /tmp/divmail-body
+		echo "For more info, see the <a href=\"https://diversion.ch/\">Diversion</a> website." >> /tmp/divmail-body
+	fi
+
+	echo "<p>Very truly yours,<br>" >> /tmp/divmail-body
+	echo "Your $FRIENDLY_ROUTER_NAME router (Model type $routerModel)</p>" >> /tmp/divmail-body
+
+	if [ "$divUpd" -ge "1" ]; then
+		echo "<font style=\"font-size:11px;\">You receive this email because you have update notification enabled in $NAME.<br>" >> /tmp/divmail-body
+		echo "If you like what $NAME does for you, consider <a href="https://diversion.ch/donate/">making a donation</a> to help its further development.<br>Thank you.</font><br>" >> /tmp/divmail-body
+	fi
+
+	echo "</body>" >> /tmp/divmail-body
+	echo "</html>" >> /tmp/divmail-body
+
+	/usr/sbin/curl --url $PROTOCOL://$SMTP:$PORT \
+		--mail-from "$FROM_ADDRESS" --mail-rcpt "$TO_ADDRESS" \
+		--upload-file /tmp/divmail-body \
+		--ssl-reqd \
+		--user "$USERNAME:$(/usr/sbin/openssl aes-256-cbc -d -in /opt/share/diversion/.conf/emailpw.enc -pass pass:ditbabot,isoi)" $SSL_FLAG
+
+	if [ "$?" = "0" ]; then
+		rm_temp_files
+		logger -t Diversion "sent $NAME update notification"
+		return 0
+	else
+		rm_temp_files
+		logger -t Diversion "was unable to send $NAME update notification, check settings"
+		return 1
+	fi
+else
+	logger "$NAME update check, no updates available"
+	rm_temp_files
+fi
+#eof
