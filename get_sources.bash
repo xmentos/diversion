@@ -7,7 +7,6 @@ curl -Os  https://diversion.ch/diversion/$VERSION/file/install.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/write-config.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/alternate-bf.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/ash-history.div
-curl -Os  https://diversion.ch/diversion/$VERSION/file/functions.local
 curl -Os  https://diversion.ch/diversion/$VERSION/file/mount-entware.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/post-conf.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/rc.func.div
