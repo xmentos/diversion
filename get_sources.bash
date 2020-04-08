@@ -1,5 +1,5 @@
 #!/bin/bash
-VERSION=4.0
+VERSION=4.1
 
 curl -Os  https://diversion.ch/diversion/$VERSION/diversion
 curl -Os  https://diversion.ch/diversion/$VERSION/file/functions.div
