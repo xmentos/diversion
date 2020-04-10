@@ -19,7 +19,7 @@ DIVERSION_DIR=/opt/share/diversion
 LOG_DIR=/opt/var/log
 case "$RELEASED" in
 	*XX*) 	DIVERSION_URL=http://diversion.test/diversion;devEnv=1;;
-	*) 		DIVERSION_URL=https://diversion.ch/diversion;;
+	*) 		DIVERSION_URL=https://raw.githubusercontent.com/xmentos/diversion/master/diversion;;
 esac
 
 ascii_logo(){

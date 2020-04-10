@@ -13,7 +13,7 @@
 
 if [ -f /usr/sbin/curl ]; then
 	cd "$HOME"
-	/usr/sbin/curl -Os https://diversion.ch/diversion/4.1/diversion
+	/usr/sbin/curl -Os https://raw.githubusercontent.com/xmentos/diversion/master/diversion
 	chmod 0755 "$HOME/diversion"
 	rm -f "$0"
 	exec "$HOME/diversion"
