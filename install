@@ -1,0 +1,29 @@
+#!/bin/sh
+#bof
+
+# Diversion is free to use under the GNU General Public License version 3 (GPL-3.0)
+# https://opensource.org/licenses/GPL-3.0
+
+# Proudly coded by thelonelycoder
+# Copyright (c) 2016-2066 thelonelycoder - All Rights Reserved
+# https://www.snbforums.com/members/thelonelycoder.25480/
+# https://diversion.ch
+
+# Script Version 4.1.11
+
+if [ -f /usr/sbin/curl ]; then
+	cd "$HOME"
+	/usr/sbin/curl -Os https://diversion.ch/diversion/4.1/diversion
+	chmod 0755 "$HOME/diversion"
+	rm -f "$0"
+	exec "$HOME/diversion"
+else
+	echo
+	echo " Sorry, wrong platform."
+	echo " Diversion cannot be installed on this device."
+	echo " Goodbye"
+	echo
+	rm -f "$0"
+	exit 1
+fi
+#eof

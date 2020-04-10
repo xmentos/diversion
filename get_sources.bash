@@ -1,7 +1,10 @@
 #!/bin/bash
 VERSION=4.1
 
+curl -Os  https://diversion.ch/install
 curl -Os  https://diversion.ch/diversion/$VERSION/diversion
+
+cd file
 curl -Os  https://diversion.ch/diversion/$VERSION/file/functions.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/install.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/write-config.div
@@ -18,5 +21,6 @@ curl -Os  https://diversion.ch/diversion/$VERSION/file/update-notification
 curl -Os  https://diversion.ch/diversion/$VERSION/file/backup.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/stats.div
 curl -Os  https://diversion.ch/diversion/$VERSION/file/div-openssl.cnf
+cd ..
 
 echo done
