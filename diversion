@@ -9,6 +9,13 @@
 # https://www.snbforums.com/members/thelonelycoder.25480/
 # https://diversion.ch
 
+# shellcheck disable=SC2009
+# SC2009 = Consider uing pgrep; no pgrep on asuswrt
+# shellcheck disable=SC2059
+# SC2059 = Don't use variables in the printf format string. Use printf "..%s.." "$foo"; no point rewriting
+# shellcheck disable=SC2154
+# SC2154 = var is referenced but not assigned; common use cause of multiple files where these are assigned
+
 VERSION=4.1.11
 RELEASED="April 01 2020"
 SELF=diversion
@@ -55,7 +62,7 @@ state_check(){
 
 		if [ -z "$EDITION" ]; then
 			STATE=3
-			[ "$(opkg list-installed | /opt/bin/grep pixelserv-tls)" ] && EDITION=Standard || EDITION=Lite
+			opkg list-installed | /opt/bin/grep -q pixelserv-tls && EDITION=Standard || EDITION=Lite
 		fi
 
 		case "$EDITION" in
@@ -121,7 +128,7 @@ state_check(){
 			echo
 			echo " Sorry, wrong platform."
 			echo " $NAME cannot be installed on this device."
-			rm -f $0
+			rm -f "$0"
 			ascii_logo Goodbye
 		fi
 
@@ -158,7 +165,7 @@ state_check(){
 			# Show basic menu
 			case "${@}" in
 				"sh-"* | *" sh"	)	bm=ios ;;
-				*)					bm=ssh ;;
+				*)			bm=ssh ;;
 			esac
 
 			case "${@}" in
