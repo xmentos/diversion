@@ -2,6 +2,7 @@
 VERSION=4.1
 
 curl -Os  https://diversion.ch/install
+curl -Os  https://diversion.ch/diversion/diversion.info
 curl -Os  https://diversion.ch/diversion/$VERSION/diversion
 
 cd file

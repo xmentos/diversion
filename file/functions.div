@@ -78,7 +78,7 @@ au_function(){
 
 check_for_update(){
 	rm -f /tmp/diversion.info
-	_curl "$DIVERSION_URL/diversion.info" -o /tmp/diversion.info
+	_curl "$DIVERSION_URL/master/diversion.info" -o /tmp/diversion.info
 
 	if [ -f "/tmp/diversion.info" ] && grep -wq '^#bof' /tmp/diversion.info && grep -wq '^#eof' /tmp/diversion.info; then
 		unset S_VERSION S_M_VERSION
