@@ -13,9 +13,11 @@
 
 install_diversion(){
 	needsReboot=0
-	check_firmware
+	if [ -z "${DIV_LOCAL_TESTS}" ]; then
+	    check_firmware
+	    check_router
+	fi
 	check_internet
-	check_router
 	echo
 	check_jffconfigs
 	[ "$action" = "install" ] && check_prev_install

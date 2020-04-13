@@ -846,7 +846,6 @@ d_function(){
 	action_aborted(){
 		printf "\\n\\n${NOK} Abort signal detected\\n"
 		printf "${SPACE} Aborting $action, cleaning up temp files...\\n"
-		[ "$0" != "/opt/bin/$SELF" ] && rm -f "$0"
 		rm -rf /tmp/diversion
 		trap - 1 2 3 6 15
 		reload_d_menu
@@ -1447,7 +1446,12 @@ get_file(){
 	# Positional parameters: 1: File, 2: Action, 3: Save to, 4: Get from, 5: Copy to
 	faok=
 	if [ "$2" = "new" ]; then
+	    # TODO: fix indenting (tab and not 4 spaces!)
+	    if [ -z ${DIV_LOCAL_TESTS} ]; then
 		_curl "$DIVERSION_URL/${VERSION}$4$1" -o "$3/${1}.new"
+	    else
+		_curl file://${PWD}"$4$1" -o "$3/${1}.new"
+	    fi
 		if [ -s "$3/${1}.new" ]; then
 			if grep -wq '^#bof' "$3/${1}.new" && grep -wq '^#eof' "$3/${1}.new"; then
 				mv -f "$3/${1}.new" "$3/$1"
