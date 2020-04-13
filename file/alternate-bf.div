@@ -29,7 +29,7 @@ write_dnsmasq_conf(){
 	echo
 	if [ "$aBFConfInc" = "on" ]; then
 		echo "# /jffs/configs/dnsmasq.conf.add directives #"
-		for line in "$(grep "^[^#]" /jffs/configs/dnsmasq.conf.add)";do
+		grep "^[^#]" /jffs/configs/dnsmasq.conf.add | while IFS= read -r line; do
 			echo "$line"
 		done
 		echo

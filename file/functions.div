@@ -1635,8 +1635,8 @@ c_email_edit(){
 		done
 
 		case "$value" in
-		 [Ee])	c_email_edit;break;;
-			*)	write_email_config_file;c_email_edit;break;;
+		 [Ee])	c_email_edit;return 1;;
+			*)	write_email_config_file;c_email_edit;return 1;;
 		esac
 	fi
 }
@@ -1944,7 +1944,7 @@ ep_function(){
 	while true; do
 		entloop(){
 			printf "\\n Enter selection [$min-$max e=Exit] ";read -r continue
-			if [ "$continue" -eq "$continue" 2>/dev/null ]; then
+			if [ "$continue" -eq "$continue" ] 2>/dev/null; then
 				if [ "$continue" -lt "$min" ] || [ "$continue" -gt "$max" ]; then
 					printf "\\n input is not an option\\n"
 					entloop;return 1
@@ -2189,7 +2189,7 @@ ep_function(){
 		while true; do
 			entloop(){
 				printf "\\n Enter selection [$min-$max e=Exit] ";read -r continue
-				if [ "$continue" -eq "$continue" 2>/dev/null ]; then
+				if [ "$continue" -eq "$continue" ] 2>/dev/null; then
 					if [ "$continue" -lt "$min" ] || [ "$continue" -gt "$max" ]; then
 						printf "\\n input is not an option\\n"
 						entloop;return 1
