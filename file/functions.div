@@ -97,21 +97,21 @@ check_for_update(){
 			while true; do
 				printf "\\n Do you want to update now? [1=Yes e=Exit] ";read -r continue
 				case "$continue" in
-					1)	VERSION=${S_VERSION:0:3};action=update;break;;
+					1)	VERSION=${S_VERSION};action=update;break;;
 				 [Ee])	exit_message;reload_menu;break;;
 					*)	printf "\\n input is not an option\\n\\n";;
 				esac
 			done
 		else
 			localmd5="$(md5sum "/opt/bin/$SELF" | awk '{print $1}')"
-			remotemd5="$(/usr/sbin/curl -fsL --retry 3 "$DIVERSION_URL/${VERSION:0:3}/$SELF" | md5sum | awk '{print $1}')"
+			remotemd5="$(/usr/sbin/curl -fsL --retry 3 "$DIVERSION_URL/${VERSION}/$SELF" | md5sum | awk '{print $1}')"
 			if [ "$localmd5" != "$remotemd5" ]; then
 				echo "$INFO A minor update is available for $NAME,"
 				echo "$SPACE no version change."
 				while true; do
 					printf "\\n Do you want to update now? [1=Yes e=Exit] ";read -r continue
 					case "$continue" in
-						1)	VERSION=${S_VERSION:0:3};action=update;break;;
+						1)	VERSION=${S_VERSION};action=update;break;;
 					 [Ee])	exit_message;reload_menu;break;;
 						*)	printf "\\n input is not an option\\n";;
 					esac
@@ -121,7 +121,7 @@ check_for_update(){
 				while true; do
 					printf "\\n Do you want to force update? [1=Yes e=Exit] ";read -r continue
 					case "$continue" in
-						1)	VERSION=${S_VERSION:0:3};action=update;break;;
+						1)	VERSION=${S_VERSION};action=update;break;;
 					 [Ee])	exit_message;reload_menu;break;;
 						*)	printf "\\n input is not an option\\n";;
 					esac

@@ -34,9 +34,9 @@ if [ -f /opt/share/diversion/.conf/email.conf ] && [ -f /opt/share/diversion/.co
 			divUpd=1
 		else
 			localmd5="$(md5sum "/opt/bin/diversion" | awk '{print $1}')"
-			remotemd5="$(curl -fsL --retry 3 "$INSTALL_URL/${S_VERSION:0:3}/diversion" | md5sum | awk '{print $1}')"
+			remotemd5="$(curl -fsL --retry 3 "$INSTALL_URL/${S_VERSION}/diversion" | md5sum | awk '{print $1}')"
 			if [ "$localmd5" != "$remotemd5" ]; then
-				remoteReleased="$(curl -fsN --retry 3 "$INSTALL_URL/${S_VERSION:0:3}/diversion" | grep "^RELEASED=" | sed -e 's/RELEASED=//; s/"//g')"
+				remoteReleased="$(curl -fsN --retry 3 "$INSTALL_URL/${S_VERSION}/diversion" | grep "^RELEASED=" | sed -e 's/RELEASED=//; s/"//g')"
 				divUpd=2
 			else
 				divUpd=0
