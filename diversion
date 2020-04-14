@@ -112,7 +112,7 @@ state_check(){
 							action=install
 							d_function;break;;
 					[Ee])	clear
-							[ "$(cd "$(dirname "$0")"; pwd -P)/$SELF" != "/opt/bin/$SELF" ] && rm -f "$(cd "$(dirname "$0")"; pwd -P)/$SELF"
+							[ "$(cd "$(dirname "$0")"; pwd -P)/$SELF" != "/opt/bin/$SELF" ]
 							ascii_logo Goodbye;break;;
 					*) 		printf "\\n input is not an option\\n\\n";;
 				esac
