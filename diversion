@@ -82,7 +82,6 @@ state_check(){
 			STATE=3
 
 		elif [ "$0" != "/opt/bin/$SELF" ]; then
-			rm -f "$0"
 			reload_SELF
 
 		elif [ "$action" ]; then
@@ -111,7 +110,7 @@ state_check(){
 					1) 		print_red_line
 							action=install
 							d_function;break;;
-					[Ee])	clear
+					[Ee])		clear
 							[ "$(cd "$(dirname "$0")"; pwd -P)/$SELF" != "/opt/bin/$SELF" ]
 							ascii_logo Goodbye;break;;
 					*) 		printf "\\n input is not an option\\n\\n";;
@@ -121,7 +120,6 @@ state_check(){
 			echo
 			echo " Sorry, wrong platform."
 			echo " $NAME cannot be installed on this device."
-			rm -f $0
 			ascii_logo Goodbye
 		fi
 

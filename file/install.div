@@ -13,11 +13,11 @@
 
 install_diversion(){
 	needsReboot=0
+	check_firmware
+	check_internet
 	if [ -z "${DIV_LOCAL_TESTS}" ]; then
-	    check_firmware
 	    check_router
 	fi
-	check_internet
 	echo
 	check_jffconfigs
 	[ "$action" = "install" ] && check_prev_install
@@ -30,7 +30,10 @@ install_diversion(){
 		esac
 	fi
 	select_logging
-	check_entware
+	if [ -z "${DIV_LOCAL_TESTS}" ]; then
+	    # ensure grep, find, column and zip installed locally for Diversion
+	    check_entware
+	fi
 	make_directories
 	write_b_w_list
 	[ "$EN" -ge "2" ] && check_pixelserv
@@ -43,13 +46,17 @@ update_diversion(){
 	echo
 	needsReboot=0
 	check_firmware update
-	check_router
+	if [ -z "${DIV_LOCAL_TESTS}" ]; then
+	    check_router
+	fi
 	check_previous_version
 	check_jffconfigs
 	if [ "$EN" -ge "2" ]; then
 		reserve_ip
 	fi
-	check_entware
+	if [ -z "${DIV_LOCAL_TESTS}" ]; then
+	    check_entware
+	fi
 	make_directories
 	write_b_w_list
 	set_defaults
@@ -72,9 +79,14 @@ check_firmware(){
 			aarch64)	PART_TYPES='ext2|ext3|ext4'
 						INST_URL='http://bin.entware.net/aarch64-k3.10/installer/generic.sh'
 						entVer="Entware (aarch64)";;
+			x86_64)		PART_TYPES='ext4|btrfs'
+						INST_URL='http://bin.entware.net/x64-k3.2/installer/generic.sh'
+						entVer="Entware (x64)";;
 			*)			lastError=" $(uname -m) is an unsupported platform\\n to install $NAME on."
 						reload_d_menu;;
 		esac
+
+		[ -z "${DIV_LOCAL_TESTS}" ] || return 0
 
 		case "$(grep -oE 'merlin|OpenWrt|padavan' /proc/version)" in
 			merlin) 	echo "${OK} Asuswrt-Merlin";;
@@ -112,6 +124,8 @@ check_firmware(){
 						fi;;
 		esac
 	fi
+
+	[ -z "${DIV_LOCAL_TESTS}" ] || return 0
 
 	if [ "$(nvram get sw_mode)" != "1" ]; then
 		case "$(nvram get sw_mode)" in
