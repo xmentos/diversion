@@ -980,10 +980,7 @@ check_entware(){
 		[ "$i" = "2" ] && devNo=1-1 || devNo="1-$((i-1))"
 		while true;do
 			printf "\\n Select device [$devNo] ";read -r device
-			case "$device" in
-				[$noad])	break;;
-				*)			printf "\\n input is not an option\\n";;
-			esac
+			echo "$noad" | grep -q ${device}' ' && break || printf "\\n input is not an option\\n"
 		done
 
 		eval entDev="\$mounts$device"
