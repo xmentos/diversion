@@ -19,7 +19,7 @@ DIVERSION_DIR=/opt/share/diversion
 LOG_DIR=/opt/var/log
 case "$RELEASED" in
 	*XX*) 	DIVERSION_URL=http://diversion.test/diversion;devEnv=1;;
-	*) 		DIVERSION_URL=https://diversion.ch/diversion;;
+	*) 		DIVERSION_URL=https://raw.githubusercontent.com/xmentos/diversion;;
 esac
 
 ascii_logo(){
@@ -1464,7 +1464,7 @@ get_file(){
 	# Positional parameters: 1: File, 2: Action, 3: Save to, 4: Get from, 5: Copy to
 	faok=
 	if [ "$2" = "new" ]; then
-		_curl "$DIVERSION_URL/${VERSION:0:3}$4$1" -o "$3/${1}.new"
+		_curl "$DIVERSION_URL/${VERSION}$4$1" -o "$3/${1}.new"
 		if [ -s "$3/${1}.new" ]; then
 			if grep -wq '^#bof' "$3/${1}.new" && grep -wq '^#eof' "$3/${1}.new"; then
 				mv -f "$3/${1}.new" "$3/$1"
