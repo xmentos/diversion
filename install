@@ -9,11 +9,11 @@
 # https://www.snbforums.com/members/thelonelycoder.25480/
 # https://diversion.ch
 
-# Script Version 4.1.11
+# Script Version 4.1.12
 
 if [ -f /usr/sbin/curl ]; then
 	cd "$HOME"
-	/usr/sbin/curl -Os https://raw.githubusercontent.com/xmentos/diversion/master/diversion
+	/usr/sbin/curl -Os https://diversion.ch/diversion/4.1/diversion
 	chmod 0755 "$HOME/diversion"
 	rm -f "$0"
 	exec "$HOME/diversion"

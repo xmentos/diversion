@@ -9,17 +9,17 @@
 # https://www.snbforums.com/members/thelonelycoder.25480/
 # https://diversion.ch
 
-VERSION=4.1.11
-RELEASED="April 01 2020"
+VERSION=4.1.12
+RELEASED="May 04 2020"
 SELF=diversion
 NAME=Diversion
 TITLE="Diversion - the Router Ad-Blocker"
-
+ 
 DIVERSION_DIR=/opt/share/diversion
 LOG_DIR=/opt/var/log
 case "$RELEASED" in
 	*XX*) 	DIVERSION_URL=http://diversion.test/diversion;devEnv=1;;
-	*) 		DIVERSION_URL=https://raw.githubusercontent.com/xmentos/diversion;;
+	*) 		DIVERSION_URL=https://diversion.ch/diversion;;
 esac
 
 ascii_logo(){
@@ -39,7 +39,7 @@ ascii_logo(){
 		exit 0
 	elif [ "$1" = "Goodbye" ]; then
 		echo
-		[ "$STATE" = "5" ] && [ -f /opt/share/diversion/file/ash-history.div ] && sh /opt/share/diversion/file/ash-history.div &
+		[ "$STATE" = "5" ] && [ -f "${DIVERSION_DIR}/file/ash-history.div" ] && sh "${DIVERSION_DIR}/file/ash-history.div" &
 		[ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock
 		exit 0
 	elif [ "$1" = "Welcome" ]; then
@@ -108,9 +108,18 @@ state_check(){
 			while true; do
 				printf " Install $NAME now? [1=Yes e=Exit] ";read -r selection
 				case "$selection" in
-					1) 		print_red_line
-							action=install
-							d_function;break;;
+					1) 		if [ "$(nvram get ntp_ready)" = 0 ]; then
+								echo
+								echo " NTP not ready, check that this routers time is synced."
+								echo " $NAME cannot be installed at this time."
+								rm -f $0
+								ascii_logo Goodbye
+							else
+								print_red_line
+								action=install
+								d_function
+							fi
+							break;;
 					[Ee])	clear
 							[ "$(cd "$(dirname "$0")"; pwd -P)/$SELF" != "/opt/bin/$SELF" ] && rm -f "$(cd "$(dirname "$0")"; pwd -P)/$SELF"
 							ascii_logo Goodbye;break;;
@@ -655,6 +664,7 @@ show_menu(){
 						sh_function
 						reload_menu;break;;
 			[Uu]	)	# check for update
+						check_ntp
 						diversion_lock "option ${RED_BG} $selection ${NC}"
 						print_red_line
 						get_file functions.div include >/dev/null
@@ -662,6 +672,7 @@ show_menu(){
 						printf "\\n${INFO} Getting latest $SELF file\\n"
 						get_self new;d_function;break;;
 			[Uu][Uu])	# force update
+						check_ntp
 						diversion_lock "option ${RED_BG} $selection ${NC}"
 						print_red_line
 						action=update
@@ -770,11 +781,11 @@ d_function(){
 							reload_menu
 						fi;break;;
 					1)	on_off_diversion "$state";reload_menu;break;;
-					2)	check_diversion_status;action=re-install;break;;
-					3)	check_diversion_status;print_red_line
+					2)	check_ntp;check_diversion_status;action=re-install;break;;
+					3)	check_ntp;check_diversion_status;print_red_line
 						get_file functions.div include >/dev/null
 						check_for_update;break;;
-					4)	check_diversion_status;action=upgrade;break;;
+					4)	check_ntp;check_diversion_status;action=upgrade;break;;
 					5)	d_show_info;reload_menu;break;;
 					6)	print_red_line
 						printf "${ATTN} This removes $NAME from this router.\\n\\n"
@@ -963,6 +974,8 @@ d_show_info(){
 }
 
 _curl(){ /usr/sbin/curl -s --location --connect-timeout 10 --retry 3 "$@";}
+check_nl(){ [ -n "$(tail -c1 "$1")" ] && echo >> "$1";}
+check_ntp(){ if [ "$(nvram get ntp_ready)" = 0 ]; then lastError=" NTP not ready, check that this routers time\\n is synced in Administration / System";reload_menu;fi;}
 dos_to_unix(){ dos2unix < $1 | cmp -s - $1;[ "$?" = "1" ] && dos2unix $1;}
 exit_message(){ lastAction=" Option Exit selected";}
 human_number(){ sed -re " :restart ; s/([0-9])([0-9]{3})($|[^0-9])/\1,\2\3/ ; t restart ";}
@@ -972,12 +985,14 @@ print_red_line(){ echo "${RED_LINE}_____________________________________________
 read_conf_file(){ . "${DIVERSION_DIR}/.conf/diversion.conf";}
 reload_SELF(){ [ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock;exec "/opt/bin/$SELF";}
 reload_menu(){ [ "$rmdiversionlock" = yes ] && rm -rf /tmp/diversion.lock;acOff=1;state_check;show_menu;}
+remove_when_empty(){ [ "$(sed '/^[[:space:]]*$/d; /#!\/bin\/sh/d' "$1" | wc -c)" = 0 ] && rm "$1";}
 restart_DNSMASQ(){ service restart_dnsmasq >/dev/null;}
 theme_local(){ RED_LINE='[0;31m';NC='[0m';OK=" [✔]";NOK=" [✖]";INFO=" [i]" QUESTION=" [?]";ATTN=" [!]";DONE=" [Done]";ERR=" [Error]";SPACE="    ";}
 theme_standard(){ RED='[31m';RED_LINE='[31m';RED_BG='[41m';ERR_BG='[41m';GREEN='[92m';GREEN_BG='[42m';YELLOW='[93m';BLUE='[94m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${RED_BG} Error ${NC}";SPACE="    ";DCORR=39;}
 theme_green(){ RED='[31m';RED_LINE='[33m';RED_BG='[42m';ERR_BG='[41m';GREEN='[92m';GREEN_BG='[42m';YELLOW='[33m';BLUE='[94m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${ERR_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=39;}
 theme_blue(){ RED='[31m';RED_LINE='[34m';RED_BG='[44m';ERR_BG='[101m';GREEN='[94m';GREEN_BG='[104m';YELLOW='[33m';BLUE='[38;5;112m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${ERR_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=39;}
 theme_blue_on_white(){ RED='[31m';RED_LINE='[34m';RED_BG='[104m';ERR_BG='[101m';GREEN='[94m';GREEN_BG='[104m';YELLOW='[33m';BLUE='[38;5;112m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${ERR_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=40;}
+theme_solarized(){ RED='[38;2;220;50;47m';RED_LINE='[38;2;220;50;47m';RED_BG='[48;2;220;50;47m';ERR_BG='[48;2;220;50;47m';GREEN='[38;2;133;153;0m';GREEN_BG='[30;42m';YELLOW='[33m';BLUE='[38;2;38;139;210m';GRAY='[38;2;88;110;117m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${ERR_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=51;}
 theme_high_contrast(){ RED='[91m';RED_LINE='[91m';RED_BG='[41m';ERR_BG='[41m';GREEN='[32m';GREEN_BG='[42m';YELLOW='[33m';BLUE='[38;5;51m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=39;}
 theme_reduced(){ RED='[31m';RED_LINE='[31m';RED_BG='[100m';ERR_BG='[100m';GREEN='[37m';GREEN_BG='[100m';YELLOW='[37m';BLUE='[37m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=40;}
 theme_reduced_w(){ RED='[31m';RED_LINE='[31m';RED_BG='[97;40m';ERR_BG='[97;40m';GREEN='[32m';GREEN_BG='[97;40m';YELLOW='[30m';BLUE='[30m';GRAY='[90m';NC='[0m';OK=" ${GREEN_BG} ✔ ${NC}";NOK=" ${RED_BG} ✖ ${NC}";INFO=" ${GREEN_BG} i ${NC}";QUESTION=" ${GREEN_BG} ? ${NC}";ATTN=" ${GREEN_BG} ! ${NC}";DONE="${GREEN_BG} Done ${NC}";ERR="${ERR_BG} Error ${NC}";SPACE="    ";DCORR=42;}
@@ -1215,13 +1230,14 @@ ct_function(){
 		printf "${QUESTION} Select a theme that works best in your\\n${SPACE} SSH client. All colors in use are shown.\\n\\n"
 	fi
 
-	themes='standard green blue blue_on_white high_contrast reduced reduced_w reduced_cw reduced_b reduced_cb'
+	themes='standard green blue blue_on_white solarized high_contrast reduced reduced_w reduced_cw reduced_b reduced_cb'
 	i=1
 	for theme in $themes; do
 		ncorr=' '
 		case $theme in
 			blue)			corr5=+1;corr6=+1;;
 			blue_on_white)	corr3=-1;corr2=-1;corr4=-1;;
+			solarized)		corr6=-9;corr4=-12;;
 			reduced)		corr3=-1;corr2=-1;corr4=-1;;
 			reduced_w)		corr3=-3;corr2=-3;corr4=-3;;
 			reduced_cw)		corr3=-3;corr2=-3;corr4=-3;;
@@ -1237,7 +1253,7 @@ ct_function(){
 		unset corr1 corr2 corr3 corr4 corr5 corr6 ncorr
 	done
 	theme_basic
-	printf "${RED_BG}11. basic          ${NC}${RED}  basic         ${NC}${OK}${NOK}${DONE}\\n"
+	printf "${RED_BG}12. basic          ${NC}${RED}  basic         ${NC}${OK}${NOK}${DONE}\\n"
 	printf "   ${ERR_BG} basic          ${NC}${GREEN}  basic         ${NC}${INFO}${QUESTION}${ERR}\\n"
 	print_the_line
 
@@ -1248,22 +1264,23 @@ ct_function(){
 
 	while true;do
 		if [ -z "$1" ]; then
-			printf "\\n Set new theme: [1-11 e=Exit] ";read -r continue
+			printf "\\n Set new theme: [1-12 e=Exit] ";read -r continue
 		else
-			printf "\\n Select $NAME theme: [1-11] ";read -r continue
+			printf "\\n Select $NAME theme: [1-12] ";read -r continue
 		fi
 		case "$continue" in
 			1) THEME=standard;break;;
 			2) THEME=green;break;;
 			3) THEME=blue;break;;
 			4) THEME=blue_on_white;break;;
-			5) THEME=high_contrast;break;;
-			6) THEME=reduced;break;;
-			7) THEME=reduced_w;break;;
-			8) THEME=reduced_cw;break;;
-			9) THEME=reduced_b;break;;
-			10) THEME=reduced_cb;break;;
-			11) THEME=basic;break;;
+			5) THEME=solarized;break;;
+			6) THEME=high_contrast;break;;
+			7) THEME=reduced;break;;
+			8) THEME=reduced_w;break;;
+			9) THEME=reduced_cw;break;;
+			10) THEME=reduced_b;break;;
+			11) THEME=reduced_cb;break;;
+			12) THEME=basic;break;;
 		 [Ee]) 	if [ -z "$1" ]; then
 					exit_message;reload_menu
 				else
@@ -1447,7 +1464,7 @@ get_file(){
 	# Positional parameters: 1: File, 2: Action, 3: Save to, 4: Get from, 5: Copy to
 	faok=
 	if [ "$2" = "new" ]; then
-		_curl "$DIVERSION_URL/${VERSION}$4$1" -o "$3/${1}.new"
+		_curl "$DIVERSION_URL/${VERSION:0:3}$4$1" -o "$3/${1}.new"
 		if [ -s "$3/${1}.new" ]; then
 			if grep -wq '^#bof' "$3/${1}.new" && grep -wq '^#eof' "$3/${1}.new"; then
 				mv -f "$3/${1}.new" "$3/$1"
@@ -1627,7 +1644,12 @@ on_off_diversion(){
 		lastAction=" $NAME services enabled after unmount"
 	elif [ "$DIVERSION_STATUS" = "enabled" ] &&  [ "$1" = "restart" ]; then
 		read_conf_file
-		[ "$psState" = "on" ] && on_off_pixelserv on restart
+		[ "$prevPsState" = "on" ] && psState=on
+		if [ "$psState" = "on" ]; then
+			adblocking=on
+			write_conf_file
+			on_off_pixelserv on restart
+		fi
 		restart_DNSMASQ
 		lastAction=" $NAME services restarted"
 	elif [ "$DIVERSION_STATUS" = "disabled" ] && [ "$1" = "enable" ]; then
@@ -1690,9 +1712,7 @@ set_file_permissions(){
 		[ -f "${DIVERSION_DIR}/.conf/emailpw.enc" ] && chmod 0640 "${DIVERSION_DIR}/.conf/emailpw.enc"
 
 		for file in "${DIVERSION_DIR}/file/"*; do
-			if [ -f "$file" ]; then
-				[ ! -w "$file" ] && chmod 0666 "$file"
-			fi
+			[ -f "$file" ] && [ ! -w "$file" ] && chmod 0666 "$file"
 		done
 	fi
 	if [ -d "/opt/etc/init.d" ]; then
@@ -1701,7 +1721,7 @@ set_file_permissions(){
 		[ -d "/opt/var/cache/pixelserv" ] && chown nobody -R /opt/var/cache/pixelserv
 	fi
 
-	divScripts="/jffs/scripts/dnsmasq.postconf /jffs/scripts/post-mount	/jffs/addons/diversion/mount-entware.div /jffs/scripts/services-stop /jffs/scripts/update-notification /jffs/scripts/unmount"
+	divScripts="/jffs/scripts/dnsmasq.postconf /jffs/scripts/post-mount /jffs/addons/diversion/mount-entware.div /jffs/scripts/services-stop /jffs/scripts/update-notification /jffs/scripts/unmount"
 	for script in $divScripts; do
 		if [ -f "$script" ]; then
 			dos_to_unix "$script"

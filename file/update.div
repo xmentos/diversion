@@ -9,7 +9,7 @@
 # https://www.snbforums.com/members/thelonelycoder.25480/
 # https://diversion.ch
 
-# Script Version 4.1.11
+# Script Version 4.1.12
 
 if [ -f /opt/share/diversion/.conf/email.conf ] && [ -f /opt/share/diversion/.conf/diversion.conf ]; then
 	. /opt/share/diversion/.conf/email.conf
@@ -34,9 +34,9 @@ if [ -f /opt/share/diversion/.conf/email.conf ] && [ -f /opt/share/diversion/.co
 			divUpd=1
 		else
 			localmd5="$(md5sum "/opt/bin/diversion" | awk '{print $1}')"
-			remotemd5="$(curl -fsL --retry 3 "$INSTALL_URL/${S_VERSION}/diversion" | md5sum | awk '{print $1}')"
+			remotemd5="$(curl -fsL --retry 3 "$INSTALL_URL/${S_VERSION:0:3}/diversion" | md5sum | awk '{print $1}')"
 			if [ "$localmd5" != "$remotemd5" ]; then
-				remoteReleased="$(curl -fsN --retry 3 "$INSTALL_URL/${S_VERSION}/diversion" | grep "^RELEASED=" | sed -e 's/RELEASED=//; s/"//g')"
+				remoteReleased="$(curl -fsN --retry 3 "$INSTALL_URL/${S_VERSION:0:3}/diversion" | grep "^RELEASED=" | sed -e 's/RELEASED=//; s/"//g')"
 				divUpd=2
 			else
 				divUpd=0
@@ -145,22 +145,24 @@ if [ "$divUpd" -ge "1" ] || [ "$amtmUpd" -ge "1" ] || [ "$amtmtpu" ] || [ "$1" =
 	if [ "$amtm" = "1" ]; then
 		if [ "$amtmUpd" = "1" ]; then
 			echo "<p><b>An update is available for amtm:</b><br>" >> /tmp/divmail-body
-			echo "Installed version: $localver<br><b>Available version: $remotever, released on $amtmRelease</b><br>" >> /tmp/divmail-body
+			echo "Installed version: $localver<br><b>Available version: $remotever, released on $amtmRelease</b></p>" >> /tmp/divmail-body
 		elif [ "$amtmUpd" = "2" ]; then
 			echo "<p><b>A minor update is available for amtm:</b><br>" >> /tmp/divmail-body
-			echo "Installed version: $localver<br><b>Minor update, no version change. Released on $amtmRelease</b><br>" >> /tmp/divmail-body
+			echo "Installed version: $localver<br><b>Minor update, no version change. Released on $amtmRelease</b></p>" >> /tmp/divmail-body
 		elif [ "$amtmUpd" = "3" ]; then
-			echo "<p><b>amtm update check failed because of server error</b>.<br>Try again later.<br>" >> /tmp/divmail-body
+			echo "<p><b>amtm update check failed because of server error</b>.<br>Try again later.</p>" >> /tmp/divmail-body
 		elif [ "$amtm" = "1" ]; then
-			echo "<p><b>No update available for amtm.</b><br>" >> /tmp/divmail-body
+			echo "<p><b>No update available for amtm.</b></p>" >> /tmp/divmail-body
 		fi
 		if [ "$amtm" = "1" ] && [ "$atpuc" = "0" ]; then
-			echo "There may be third-party script updates available in amtm.<br>Enter <span style=\"background-color: #970808;color: #ffffff;\">&nbsp;<b>u</b>&nbsp;</span>&nbsp;in amtm to check.</p>" >> /tmp/divmail-body
+			echo "<p>There may be third-party script updates available in amtm.<br>Enter <span style=\"background-color: #970808;color: #ffffff;\">&nbsp;<b>u</b>&nbsp;</span>&nbsp;in amtm to check.</p>" >> /tmp/divmail-body
 		elif [ "$atpuc" = "1" ] && [ "$amtmtpu" ]; then
-			echo "<p><b>Third-party script update(s) available in amtm:</b><br>" >> /tmp/divmail-body
+			echo "<p><b>Third-party script update(s) available in amtm.</b><br>" >> /tmp/divmail-body
 			echo "$amtmtpu" >> /tmp/divmail-body
+			echo "Start amtm  and enter <span style=\"background-color: #970808;color: #ffffff;\">&nbsp;<b>u</b>&nbsp;</span>&nbsp;to check for updates.<br>" >> /tmp/divmail-body
+			echo "Then use the third-party scripts own update function to update.<br></p>" >> /tmp/divmail-body
 		elif [ "$atpuc" = "1" ] && [ -z "$amtmtpu" ]; then
-			echo "<p><b>No third party script update(s) available in amtm.</b><br>" >> /tmp/divmail-body
+			echo "<p><b>No third party script update(s) available in amtm.</b></p>" >> /tmp/divmail-body
 		fi
 	fi
 

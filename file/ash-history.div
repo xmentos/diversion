@@ -9,7 +9,7 @@
 # https://www.snbforums.com/members/thelonelycoder.25480/
 # https://diversion.ch
 
-# Script Version 4.1.11
+# Script Version 4.1.12
 
 if [ -s /opt/share/diversion/.conf/diversion.conf ]; then
 	. /opt/share/diversion/.conf/diversion.conf
@@ -40,4 +40,5 @@ if [ -s /opt/share/diversion/.conf/diversion.conf ]; then
 		rm -f /tmp/div_lock_ash
 	fi
 fi
+exit 0
 #eof

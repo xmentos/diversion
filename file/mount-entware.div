@@ -9,7 +9,7 @@
 # https://www.snbforums.com/members/thelonelycoder.25480/
 # https://diversion.ch
 
-# Script Version 4.1.11
+# Script Version 4.1.12
 
 mount_entware(){
 	if [ -f "${opkgFile%/opkg}/diversion" ]; then

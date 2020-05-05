@@ -13,7 +13,7 @@
 # @Martineau in function list_files(): Fix 1 of 1 - Allow $ and spaces in file names, inspiration for file display with package column
 # @bengalih in function edit_list(): Additional code for near matches in whitelist
 
-# Script Version 4.1.11
+# Script Version 4.1.12
 
 if [ -f "${DIVERSION_DIR}/file/functions.local" ]; then
 	. "${DIVERSION_DIR}/file/functions.local"
@@ -78,7 +78,7 @@ au_function(){
 
 check_for_update(){
 	rm -f /tmp/diversion.info
-	_curl "$DIVERSION_URL/master/diversion.info" -o /tmp/diversion.info
+	_curl "$DIVERSION_URL/diversion.info" -o /tmp/diversion.info
 
 	if [ -f "/tmp/diversion.info" ] && grep -wq '^#bof' /tmp/diversion.info && grep -wq '^#eof' /tmp/diversion.info; then
 		unset S_VERSION S_M_VERSION
@@ -97,21 +97,21 @@ check_for_update(){
 			while true; do
 				printf "\\n Do you want to update now? [1=Yes e=Exit] ";read -r continue
 				case "$continue" in
-					1)	VERSION=${S_VERSION};action=update;break;;
+					1)	VERSION=${S_VERSION:0:3};action=update;break;;
 				 [Ee])	exit_message;reload_menu;break;;
 					*)	printf "\\n input is not an option\\n\\n";;
 				esac
 			done
 		else
 			localmd5="$(md5sum "/opt/bin/$SELF" | awk '{print $1}')"
-			remotemd5="$(/usr/sbin/curl -fsL --retry 3 "$DIVERSION_URL/${VERSION}/$SELF" | md5sum | awk '{print $1}')"
+			remotemd5="$(/usr/sbin/curl -fsL --retry 3 "$DIVERSION_URL/${VERSION:0:3}/$SELF" | md5sum | awk '{print $1}')"
 			if [ "$localmd5" != "$remotemd5" ]; then
 				echo "$INFO A minor update is available for $NAME,"
 				echo "$SPACE no version change."
 				while true; do
 					printf "\\n Do you want to update now? [1=Yes e=Exit] ";read -r continue
 					case "$continue" in
-						1)	VERSION=${S_VERSION};action=update;break;;
+						1)	VERSION=${S_VERSION:0:3};action=update;break;;
 					 [Ee])	exit_message;reload_menu;break;;
 						*)	printf "\\n input is not an option\\n";;
 					esac
@@ -121,7 +121,7 @@ check_for_update(){
 				while true; do
 					printf "\\n Do you want to force update? [1=Yes e=Exit] ";read -r continue
 					case "$continue" in
-						1)	VERSION=${S_VERSION};action=update;break;;
+						1)	VERSION=${S_VERSION:0:3};action=update;break;;
 					 [Ee])	exit_message;reload_menu;break;;
 						*)	printf "\\n input is not an option\\n";;
 					esac
@@ -2042,13 +2042,8 @@ ep_function(){
 								while true; do
 									printf "\\n Continue? [1=Yes e=Exit] ";read -r continue
 									case "$continue" in
-										1)	print_red_line
-											[ "$(nvram get ntp_ready)" = "1" ] && echo "${OK} NTP date is synced"
-											if [ "$(nvram get ntp_ready)" = "0" ]; then
-												lastError=" NTP date and time not synced.\\n Make sure your router syncs the time with an\\n NTP Server in Administration / System."
-												reload_menu
-											fi
-
+										1)	check_ntp
+											print_red_line
 											echo
 											echo "${INFO} Creating new pixelserv-tls CA certificate"
 
@@ -2881,26 +2876,28 @@ el_function(){
 									print_red_line
 									printf " This sets the number at which pagination begins.\\n"
 									printf " Note that if the remaining lines is 10 or less,\\n it will not paginate.\\n\\n"
-									printf " 1. Paginate off\\n 2. Paginate at 20 lines\\n 3. Paginate at 25 lines\\n 4. Paginate at 30 lines\\n"
-									printf " 5. Paginate at 35 lines\\n 6. Paginate at 40 lines\\n 7. Paginate at 50 lines\\n 8. Paginate at 60 lines\\n"
+									printf " 1. Paginate off\\n 2. Paginate at 5 lines\\n 3. Paginate at 20 lines\\n 4. Paginate at 25 lines\\n 5. Paginate at 30 lines\\n"
+									printf " 6. Paginate at 35 lines\\n 7. Paginate at 40 lines\\n 8. Paginate at 50 lines\\n 9. Paginate at 60 lines\\n"
 									while true; do
 										printf "\\n Enter your selection [1-8 e=Exit] ";read -r continue
 										case "$continue" in
 											1)	editorPaginate=off
 												write_conf_file;print_red_line;el_function;break;;
-											2)	editorPaginate=20
+											2)	editorPaginate=5
 												write_conf_file;print_red_line;el_function;break;;
-											3)	editorPaginate=25
+											3)	editorPaginate=20
 												write_conf_file;print_red_line;el_function;break;;
-											4)	editorPaginate=30
+											4)	editorPaginate=25
 												write_conf_file;print_red_line;el_function;break;;
-											5)	editorPaginate=35
+											5)	editorPaginate=30
 												write_conf_file;print_red_line;el_function;break;;
-											6)	editorPaginate=40
+											6)	editorPaginate=35
 												write_conf_file;print_red_line;el_function;break;;
-											7)	editorPaginate=50
+											7)	editorPaginate=40
 												write_conf_file;print_red_line;el_function;break;;
-											8)	editorPaginate=60
+											8)	editorPaginate=50
+												write_conf_file;print_red_line;el_function;break;;
+											9)	editorPaginate=60
 												write_conf_file;print_red_line;el_function;break;;
 										[Ee])	el_function;break;;
 											*)	printf "\\n input is not an option\\n";;
@@ -5053,7 +5050,6 @@ local_backup(){
 
 remove_diversion(){
 	print_red_line
-	remove_when_empty(){ [ "$(sed '/^[[:space:]]*$/d; /#!\/bin\/sh/d' "$1" | wc -c)" = 0 ] && rm "$1";}
 	printf "${NOK} Sorry to see you go!\\n\\n"
 	if grep -q "^swapon .* by Diversion" /jffs/scripts/post-mount 2>/dev/null; then
 		swaplocation="$(grep -E "^swapon .* by Diversion" /jffs/scripts/post-mount | awk '{print $2}')"

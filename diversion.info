@@ -1,8 +1,8 @@
 #bof
 
 S_VERSION=4.1
-S_M_VERSION=11
-S_RELEASED="April 01 2020"
+S_M_VERSION=12
+S_RELEASED="May 04 2020"
 UPDATE_TEXT='See https://diversion.ch for change log'
 UI_UPDATE_TEXT='     See https://diversion.ch for change log'
 #eof
